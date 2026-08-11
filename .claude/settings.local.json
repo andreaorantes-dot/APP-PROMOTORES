@@ -26,7 +26,13 @@
       "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\andrea.orantes\\\\Desktop\\\\APP PROMOTORES\\\\backend\"; node prisma/seed.js)",
       "Bash(git rm *)",
       "Bash(git add *)",
-      "Bash(grep -iE \"\\\\.env$|\\\\.csv$|credentials/.*\\\\.json$|dev\\\\.db\")"
+      "Bash(grep -iE \"\\\\.env$|\\\\.csv$|credentials/.*\\\\.json$|dev\\\\.db\")",
+      "Bash(git -c user.email=\"deploy@promotores.local\" -c user.name=\"Deploy\" commit -q -m \"App Promotores: frontend PWA + backend Node/Express \\(auth bcrypt, cercanía GPS, Sheets\\), listo para Render\")",
+      "Bash(git --version)",
+      "Bash(git branch *)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); node \"C:\\\\Users\\\\ANDREA~1.ORA\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-andrea-orantes-Desktop-APP-PROMOTORES\\\\c3730aa0-d49a-4604-aaef-28a78b41147c\\\\scratchpad\\\\test-parse.mjs\")",
+      "Bash(node --check backend/prisma/seed.js)",
+      "Bash(node --check backend/src/prisma.js)"
     ]
   }
 }

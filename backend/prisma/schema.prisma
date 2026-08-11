@@ -1,14 +1,14 @@
 // Esquema de datos — App Promotores
-// Motor por defecto: SQLite (archivo local, sin servidor). Para producción con
-// PostgreSQL, cambia `provider = "postgresql"` y el DATABASE_URL en .env — el
-// resto del código (queries Prisma) no cambia.
+// Motor: PostgreSQL (persistente). El DATABASE_URL viene del entorno:
+// en Render lo provee el servicio de Postgres; en local, tu .env.
+// El resto del código (queries Prisma) es idéntico al de SQLite.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

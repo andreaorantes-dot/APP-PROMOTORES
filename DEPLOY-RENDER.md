@@ -101,29 +101,30 @@ File `service-account.json`, y define
 
 ---
 
+## Base de datos: PostgreSQL persistente (gratis)
+
+El `render.yaml` provisiona una **PostgreSQL gratuita** de Render y conecta el
+`DATABASE_URL` automáticamente (no hay que copiar credenciales). Los datos —
+incluidos los **registros de visitas** — **persisten** aunque el servicio se
+duerma o se reinicie. El seed es idempotente: siembra promotores/tiendas la
+primera vez y luego se omite (usa `SEED_FORCE=true` si actualizas los CSV).
+
+> El esquema se sincroniza con `prisma db push` en el arranque (sin archivos de
+> migración). La BD de Postgres del plan free de Render **expira a los ~30 días**;
+> para producción real, usa un plan de Postgres de pago.
+
 ## Cosas importantes del plan gratuito
 
 - **Se duerme tras ~15 min sin uso.** La primera visita después de dormir tarda
-  ~30–60 s en “despertar” (incluye re-sembrar promotores/tiendas). Las siguientes
-  son instantáneas. Para que esté **siempre encendido**, sube al plan **Starter**
-  de Render (de pago).
-- **La BD SQLite es efímera en el plan free:** los **promotores y tiendas se
-  re-siembran solos** en cada arranque (desde los Secret Files), pero los
-  **registros de visitas se reinician** al reiniciarse el servicio. Para un
-  **demo** está bien. Para conservar las visitas:
-  - **Disco persistente** (Render, de pago): monta un disco en
-    `/opt/render/project/src/backend/prisma` y apunta `DATABASE_URL` ahí, o
-  - **PostgreSQL** (Render ofrece uno gratuito): en `prisma/schema.prisma` pon
-    `provider = "postgresql"`, define `DATABASE_URL` con la cadena de Postgres y
-    corre las migraciones. El código de queries no cambia.
+  ~30–60 s en “despertar”. Las siguientes son instantáneas. Para que esté
+  **siempre encendido**, sube al plan **Starter** de Render (de pago).
 
 ---
 
 ## Alternativa: Railway
 
-Railway también funciona: **New Project → Deploy from GitHub**, y en *Settings*
-del servicio pon
+Railway también funciona: **New Project → Deploy from GitHub** + **Add PostgreSQL**.
+En *Settings* del servicio pon
 `Build: npm install && npm run build && cd backend && npm install && npx prisma generate`
-y `Start: cd backend && npx prisma migrate deploy && node prisma/seed.js && node src/server.js`.
-Añade las mismas variables de entorno y un **Volume** montado en
-`backend/prisma` si quieres persistir la BD.
+y `Start: cd backend && npx prisma db push --skip-generate && node prisma/seed.js && node src/server.js`.
+Railway inyecta su propio `DATABASE_URL`; añade las mismas variables de entorno.

@@ -3,16 +3,17 @@ import { PrismaClient } from "@prisma/client";
 
 export const prisma = new PrismaClient();
 
-// --- Concurrencia en SQLite -------------------------------------------------
-// Con muchos check-in simultáneos, el modo por defecto de SQLite serializa las
-// escrituras y puede lanzar "database is locked". Activamos WAL (permite
-// lectores concurrentes mientras se escribe) y un busy_timeout para que las
-// escrituras esperen en vez de fallar. WAL es persistente (queda en el archivo).
-// En PostgreSQL estas PRAGMA se ignoran silenciosamente (no aplica).
+// --- Concurrencia -----------------------------------------------------------
+// PostgreSQL ya maneja escrituras concurrentes (MVCC), así que no requiere
+// ajustes. Las PRAGMA WAL/busy_timeout solo aplican a SQLite; se ejecutan
+// únicamente si el DATABASE_URL apunta a un archivo SQLite (`file:`).
+const isSqlite = String(process.env.DATABASE_URL || "").startsWith("file:");
+
 export async function initDb() {
-  // Algunas PRAGMA devuelven una fila (p.ej. journal_mode, busy_timeout), así que
-  // se usa $queryRawUnsafe. Se ejecutan por separado para que un fallo no bloquee
-  // a los demás. En PostgreSQL fallan silenciosamente (no aplica).
+  if (!isSqlite) {
+    console.log("[db] PostgreSQL: concurrencia nativa (MVCC), sin PRAGMA.");
+    return;
+  }
   for (const pragma of ["PRAGMA journal_mode=WAL;", "PRAGMA busy_timeout=8000;", "PRAGMA synchronous=NORMAL;"]) {
     try {
       const r = await prisma.$queryRawUnsafe(pragma);

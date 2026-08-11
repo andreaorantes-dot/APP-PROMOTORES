@@ -1,6 +1,12 @@
-# Render Blueprint — despliega la app (frontend + API) como un servicio web.
-# Render sirve HTTPS automático en https://<nombre>.onrender.com (necesario para
-# el GPS en los teléfonos) y despliega desde GitHub. Ver DEPLOY-RENDER.md.
+# Render Blueprint — despliega la app (frontend + API) + una base de datos
+# PostgreSQL gratuita. Render sirve HTTPS automático en https://<nombre>.onrender.com
+# (necesario para el GPS en los teléfonos) y despliega desde GitHub.
+
+# Base de datos PostgreSQL gratuita gestionada por Render.
+databases:
+  - name: promotores-db
+    plan: free
+
 services:
   - type: web
     name: promotores
@@ -8,8 +14,8 @@ services:
     plan: free
     # Construye el frontend (Vite) y prepara el backend (Prisma).
     buildCommand: npm install && npm run build && cd backend && npm install && npx prisma generate
-    # Aplica migraciones, siembra (idempotente) y arranca el servidor.
-    startCommand: cd backend && npx prisma migrate deploy && node prisma/seed.js && node src/server.js
+    # Sincroniza el esquema con Postgres (db push), siembra (idempotente) y arranca.
+    startCommand: cd backend && npx prisma db push --skip-generate && node prisma/seed.js && node src/server.js
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
@@ -27,9 +33,12 @@ services:
       # Render genera un secreto aleatorio y seguro para firmar el JWT.
       - key: SESSION_SECRET
         generateValue: true
-      # BD SQLite local (efímera en el plan free; ver DEPLOY-RENDER.md para persistir).
+      # DATABASE_URL se conecta AUTOMÁTICAMENTE a la BD de Postgres de arriba
+      # (Internal Connection String). No hay que copiar/pegar nada.
       - key: DATABASE_URL
-        value: "file:./dev.db"
+        fromDatabase:
+          name: promotores-db
+          property: connectionString
       # Rutas de los "Secret Files" que subes en el panel de Render (los CSV
       # con los datos reales; así NO viven en el repositorio de GitHub).
       - key: SEED_CSV_PATH
