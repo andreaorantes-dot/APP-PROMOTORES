@@ -1,0 +1,56 @@
+// Esquema de datos — App Promotores
+// Motor por defecto: SQLite (archivo local, sin servidor). Para producción con
+// PostgreSQL, cambia `provider = "postgresql"` y el DATABASE_URL en .env — el
+// resto del código (queries Prisma) no cambia.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Promoter {
+  id         String        @id // ID de promotor (número de la BBDD)
+  name       String
+  location   String? // UBICACION
+  supervisor String? // SUPERVISOR
+  password   String // hash bcrypt de la contraseña (nunca en texto plano)
+  createdAt  DateTime      @default(now())
+  visits     VisitRecord[]
+}
+
+// Catálogo GLOBAL de tiendas (sin asignación por promotor). La visibilidad se
+// resuelve por cercanía geográfica en tiempo real (GET /api/stores?lat&lng).
+model Store {
+  id      String        @id
+  name    String
+  address String
+  lat     Float
+  lng     Float
+  visits  VisitRecord[]
+}
+
+model VisitRecord {
+  id               String    @id @default(uuid())
+  promoter         Promoter  @relation(fields: [promoterId], references: [id])
+  promoterId       String
+  store            Store     @relation(fields: [storeId], references: [id])
+  storeId          String
+  day              String // YYYY-MM-DD — 1 visita por promotor/tienda/día
+  status           String // "checked-in" | "checked-out"
+  checkInTime      DateTime?
+  checkInDistance  Int?
+  checkOutTime     DateTime?
+  checkOutDistance Int?
+  rollos           Int       @default(0)
+  cubetas          Int       @default(0)
+  photo            String? // foto de la visita en Base64 (data URL), persistida
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([promoterId, storeId, day])
+  @@index([promoterId, day])
+}

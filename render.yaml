@@ -1,0 +1,38 @@
+# Render Blueprint — despliega la app (frontend + API) como un servicio web.
+# Render sirve HTTPS automático en https://<nombre>.onrender.com (necesario para
+# el GPS en los teléfonos) y despliega desde GitHub. Ver DEPLOY-RENDER.md.
+services:
+  - type: web
+    name: promotores
+    runtime: node
+    plan: free
+    # Construye el frontend (Vite) y prepara el backend (Prisma).
+    buildCommand: npm install && npm run build && cd backend && npm install && npx prisma generate
+    # Aplica migraciones, siembra (idempotente) y arranca el servidor.
+    startCommand: cd backend && npx prisma migrate deploy && node prisma/seed.js && node src/server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # El servidor de Express sirve el frontend estático (mismo origen).
+      - key: SERVE_STATIC
+        value: "true"
+      # HTTPS en Render → la cookie de sesión se marca Secure.
+      - key: COOKIE_SECURE
+        value: "true"
+      # Reglas de negocio.
+      - key: CHECK_IN_RADIUS_METERS
+        value: "100"
+      - key: NEARBY_RADIUS_METERS
+        value: "2000"
+      # Render genera un secreto aleatorio y seguro para firmar el JWT.
+      - key: SESSION_SECRET
+        generateValue: true
+      # BD SQLite local (efímera en el plan free; ver DEPLOY-RENDER.md para persistir).
+      - key: DATABASE_URL
+        value: "file:./dev.db"
+      # Rutas de los "Secret Files" que subes en el panel de Render (los CSV
+      # con los datos reales; así NO viven en el repositorio de GitHub).
+      - key: SEED_CSV_PATH
+        value: "/etc/secrets/Promotores.csv"
+      - key: SEED_STORES_CSV_PATH
+        value: "/etc/secrets/Tiendas.csv"

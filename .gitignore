@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+.env.local
+*.log
+
+# Base de datos de promotores con contraseñas en claro: NUNCA versionar.
+Promotores.csv
+*.csv
