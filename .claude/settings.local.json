@@ -32,7 +32,8 @@
       "Bash(git branch *)",
       "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); node \"C:\\\\Users\\\\ANDREA~1.ORA\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-andrea-orantes-Desktop-APP-PROMOTORES\\\\c3730aa0-d49a-4604-aaef-28a78b41147c\\\\scratchpad\\\\test-parse.mjs\")",
       "Bash(node --check backend/prisma/seed.js)",
-      "Bash(node --check backend/src/prisma.js)"
+      "Bash(node --check backend/src/prisma.js)",
+      "Bash(git -c user.email=\"deploy@promotores.local\" -c user.name=\"Deploy\" commit -q -m \"Migrar a PostgreSQL \\(Render\\): schema postgresql, render.yaml con BD gestionada + db push, seed robusto a delimitador/codificación\")"
     ]
   }
 }

@@ -29,10 +29,13 @@ export const config = {
 
   // --- Google Sheets (solo para el administrador) --------------------------
   // Al hacer check-out, el backend agrega una fila con los datos de la visita.
-  // Se autentica con un Service Account (archivo JSON). Si no está configurado,
-  // la integración se omite silenciosamente (no bloquea el check-out).
+  // Se autentica con un Service Account. Puedes darle las credenciales de dos
+  // formas (cualquiera): el JSON completo en `GOOGLE_SERVICE_ACCOUNT_JSON`, o la
+  // ruta a un archivo JSON en `GOOGLE_SERVICE_ACCOUNT_KEY_FILE`. Si no hay
+  // credenciales o spreadsheetId, la integración se omite (no bloquea nada).
   sheets: {
-    keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE ?? "", // ruta al JSON
+    json: process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? "", // JSON completo (env var)
+    keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE ?? "", // o ruta a un archivo JSON
     spreadsheetId: process.env.GOOGLE_SHEETS_ID ?? "",
     tab: process.env.GOOGLE_SHEETS_TAB ?? "Visitas",
   },

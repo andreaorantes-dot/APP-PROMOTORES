@@ -7,6 +7,8 @@ import path from "node:path";
 import { config } from "./config.js";
 import { initDb } from "./prisma.js";
 import { csrfProtection } from "./csrf.js";
+import { requireAuth } from "./auth.js";
+import { checkSheetsConnection } from "./sheets.js";
 import authRoutes from "./routes/auth.js";
 import storeRoutes from "./routes/stores.js";
 import visitRoutes from "./routes/visits.js";
@@ -52,6 +54,12 @@ app.get("/api/health", (req, res) => res.json({ ok: true }));
 app.use("/api", authRoutes); // expone /api/login, /api/auth/session, /api/auth/logout
 app.use("/api/stores", storeRoutes); // GET /api/stores?lat&lng (tiendas cercanas)
 app.use("/api/visits", visitRoutes);
+
+// Diagnóstico de Google Sheets (requiere sesión): verifica credenciales y acceso
+// al documento sin necesidad de un check-out real.
+app.get("/api/sheets/status", requireAuth, async (req, res) => {
+  res.json(await checkSheetsConnection());
+});
 
 // --- Servir el frontend estático (producción, mismo origen) ----------------
 // Si existe el build del frontend (../../dist), lo servimos desde este mismo

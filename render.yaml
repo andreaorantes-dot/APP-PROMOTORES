@@ -45,3 +45,12 @@ services:
         value: "/etc/secrets/Promotores.csv"
       - key: SEED_STORES_CSV_PATH
         value: "/etc/secrets/Tiendas.csv"
+      # --- Google Sheets (admin) ---------------------------------------------
+      # Pon estos valores en el panel de Render (sync:false = no van al repo).
+      # GOOGLE_SERVICE_ACCOUNT_JSON = pega el JSON completo del Service Account.
+      - key: GOOGLE_SHEETS_ID
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GOOGLE_SHEETS_TAB
+        value: "Visitas"
