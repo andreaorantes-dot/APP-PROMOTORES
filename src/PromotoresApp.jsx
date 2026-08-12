@@ -357,12 +357,16 @@ export default function PromotoresApp() {
     };
   }, [screen, store]);
 
+  // Radio real que aplica el servidor (configurable con CHECK_IN_RADIUS_METERS).
+  // Lo envía la sesión; si aún no llegó, usa el valor por defecto del cliente.
+  const radiusMeters = user?.checkInRadiusMeters ?? RANGE_METERS;
+
   // Distancia INFORMATIVA para la UI (el servidor es la autoridad). Se calcula
   // solo si hay un fix GPS real.
   const distance = store && gpsCoords
     ? distanceMeters(gpsCoords.lat, gpsCoords.lng, store.lat, store.lng)
     : null;
-  const inRange = distance != null && distance <= RANGE_METERS;
+  const inRange = distance != null && distance <= radiusMeters;
 
   function openStore(storeObj) {
     setSelectedStore(storeObj);
@@ -760,11 +764,11 @@ export default function PromotoresApp() {
                 </button>
               )}
 
-              {/* Aviso informativo: el servidor es quien valida los {RANGE_METERS} m. */}
+              {/* Aviso informativo: el servidor es quien valida el radio real. */}
               {gpsCoords && !inRange && (
                 <p style={{ display: "flex", gap: 6, alignItems: "flex-start", fontSize: 12, color: COLORS.textMuted, marginTop: 12, lineHeight: 1.5 }}>
                   <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                  Parece que estás a {fmtDistance(distance)} de la tienda. Debes estar a {RANGE_METERS} m o menos; el servidor validará tu ubicación al registrar.
+                  Parece que estás a {fmtDistance(distance)} de la tienda. Debes estar a {fmtDistance(radiusMeters)} o menos; el servidor validará tu ubicación al registrar.
                 </p>
               )}
             </>
@@ -803,10 +807,11 @@ export default function PromotoresApp() {
               <Stepper label="Rollos" value={rollos} onChange={setRollos} />
               <Stepper label="Cubetas" value={cubetas} onChange={setCubetas} />
 
-              {!inRange && (
-                <p style={{ display: "flex", gap: 6, alignItems: "flex-start", fontSize: 12, color: COLORS.danger, marginTop: 14, lineHeight: 1.5 }}>
+              {/* Aviso informativo (no bloquea): el servidor valida la distancia real. */}
+              {gpsCoords && !inRange && (
+                <p style={{ display: "flex", gap: 6, alignItems: "flex-start", fontSize: 12, color: COLORS.textMuted, marginTop: 14, lineHeight: 1.5 }}>
                   <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                  Debes estar en la sucursal (a {RANGE_METERS} m o menos) para registrar tu salida.
+                  Debes estar en la sucursal (a {fmtDistance(radiusMeters)} o menos). El servidor validará tu ubicación al confirmar.
                 </p>
               )}
 
@@ -819,12 +824,12 @@ export default function PromotoresApp() {
                 </button>
                 <button
                   onClick={handleConfirmCheckout}
-                  disabled={!inRange || busy}
+                  disabled={!gpsCoords || busy}
                   style={{
                     flex: 2, padding: "12px 0", borderRadius: 10, border: "none",
-                    background: inRange ? COLORS.success : COLORS.surface2,
-                    color: inRange ? "#052E24" : COLORS.textMuted,
-                    fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: inRange && !busy ? "pointer" : "not-allowed",
+                    background: gpsCoords ? COLORS.success : COLORS.surface2,
+                    color: gpsCoords ? "#052E24" : COLORS.textMuted,
+                    fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: gpsCoords && !busy ? "pointer" : "not-allowed",
                   }}
                 >
                   {busy ? "Confirmando…" : "Confirmar salida"}

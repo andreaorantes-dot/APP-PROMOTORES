@@ -37,7 +37,8 @@
       "Bash(git fetch *)",
       "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\andrea.orantes\\\\Desktop\\\\APP PROMOTORES\"; npx vite build 2>&1 | Select-Object -Last 4)",
       "Bash(git -c user.email=\"deploy@promotores.local\" -c user.name=\"Deploy\" commit -q -m \"Check-out: mensaje mas claro \\(debes estar en la sucursal\\) + fuerza actualizacion de la PWA \\(sw cache v2\\). La regla ya exigia estar dentro; no se invierte.\")",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git -c user.email=\"deploy@promotores.local\" -c user.name=\"Deploy\" commit -q -m \"Fix check-out: el radio ahora lo dicta el backend \\(CHECK_IN_RADIUS_METERS\\) y el frontend lo recibe en la sesion; el boton de salida ya no se bloquea con el limite fijo de 100m. Ahora check-in y check-out usan el mismo radio \\(4km configurado\\). sw cache v3.\")"
     ]
   }
 }

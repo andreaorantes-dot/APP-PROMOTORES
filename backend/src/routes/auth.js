@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticate, issueSession, clearSession, requireAuth } from "../auth.js";
 import { findPromoterById } from "../db.js";
+import { config } from "../config.js";
 
 const router = Router();
 
@@ -27,6 +28,9 @@ router.get("/auth/session", requireAuth, async (req, res) => {
     name: promoter.name,
     location: promoter.location,
     supervisor: promoter.supervisor,
+    // Radio de check-in/out (m) que aplica el servidor. El frontend lo usa para
+    // que su UI coincida con la regla real (configurable con CHECK_IN_RADIUS_METERS).
+    checkInRadiusMeters: config.rangeMeters,
   });
 });
 
