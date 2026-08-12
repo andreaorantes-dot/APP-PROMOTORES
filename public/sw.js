@@ -1,7 +1,7 @@
 // Service worker mínimo para que la app sea instalable (PWA) y funcione el
 // "shell" sin conexión. NO intercepta /api (esas peticiones van siempre a la
 // red; la lógica offline de visitas ya la maneja la app con IndexedDB cifrado).
-const CACHE = "promotores-shell-v1";
+const CACHE = "promotores-shell-v2";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {

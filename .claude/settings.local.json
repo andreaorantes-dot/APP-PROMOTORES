@@ -33,7 +33,11 @@
       "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); node \"C:\\\\Users\\\\ANDREA~1.ORA\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-andrea-orantes-Desktop-APP-PROMOTORES\\\\c3730aa0-d49a-4604-aaef-28a78b41147c\\\\scratchpad\\\\test-parse.mjs\")",
       "Bash(node --check backend/prisma/seed.js)",
       "Bash(node --check backend/src/prisma.js)",
-      "Bash(git -c user.email=\"deploy@promotores.local\" -c user.name=\"Deploy\" commit -q -m \"Migrar a PostgreSQL \\(Render\\): schema postgresql, render.yaml con BD gestionada + db push, seed robusto a delimitador/codificación\")"
+      "Bash(git -c user.email=\"deploy@promotores.local\" -c user.name=\"Deploy\" commit -q -m \"Migrar a PostgreSQL \\(Render\\): schema postgresql, render.yaml con BD gestionada + db push, seed robusto a delimitador/codificación\")",
+      "Bash(git fetch *)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\andrea.orantes\\\\Desktop\\\\APP PROMOTORES\"; npx vite build 2>&1 | Select-Object -Last 4)",
+      "Bash(git -c user.email=\"deploy@promotores.local\" -c user.name=\"Deploy\" commit -q -m \"Check-out: mensaje mas claro \\(debes estar en la sucursal\\) + fuerza actualizacion de la PWA \\(sw cache v2\\). La regla ya exigia estar dentro; no se invierte.\")",
+      "Bash(git push *)"
     ]
   }
 }

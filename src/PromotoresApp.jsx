@@ -806,7 +806,7 @@ export default function PromotoresApp() {
               {!inRange && (
                 <p style={{ display: "flex", gap: 6, alignItems: "flex-start", fontSize: 12, color: COLORS.danger, marginTop: 14, lineHeight: 1.5 }}>
                   <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                  Te alejaste de la tienda. Debes estar dentro del rango para confirmar la salida.
+                  Debes estar en la sucursal (a {RANGE_METERS} m o menos) para registrar tu salida.
                 </p>
               )}
 
