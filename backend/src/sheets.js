@@ -29,8 +29,20 @@ const HEADERS = [
   "cubetas",
 ];
 
+// Encabezados de la pestaña de retroalimentación (reportes de error de los
+// asesores). Se crean solos si la pestaña está vacía.
+const FEEDBACK_HEADERS = [
+  "registrado_en", // fecha/hora del envío (ISO)
+  "id_promotor", // ID capturado en el form (autollenado, editable)
+  "nombre", // nombre capturado en el form
+  "sucursal", // sucursal escrita a mano por el asesor
+  "descripcion", // descripción amplia del error/problema
+  "enviado_por", // ID de la sesión que envió el reporte (auditoría)
+];
+
 let sheetsClientPromise = null;
 let headerEnsured = false;
+let feedbackHeaderEnsured = false;
 
 function isConfigured() {
   return Boolean((config.sheets.json || config.sheets.keyFile) && config.sheets.spreadsheetId);
@@ -79,6 +91,72 @@ async function ensureHeader(sheets) {
     });
   }
   headerEnsured = true;
+}
+
+// Crea la pestaña `tab` si aún no existe en el documento y, si está vacía,
+// escribe la fila de encabezados. A diferencia de `ensureHeader` (que asume que
+// la pestaña "Visitas" ya existe), esto es necesario para la pestaña de
+// retroalimentación, que "apenas se va a crear". Se ejecuta una vez por proceso.
+async function ensureFeedbackTab(sheets) {
+  if (feedbackHeaderEnsured) return;
+  const tab = config.sheets.feedbackTab;
+
+  // 1) ¿Existe la pestaña? Leemos los títulos de todas las hojas del documento.
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId: config.sheets.spreadsheetId,
+    fields: "sheets.properties.title",
+  });
+  const exists = (meta.data.sheets ?? []).some((s) => s.properties?.title === tab);
+
+  // 2) Si no existe, la creamos con un batchUpdate (addSheet).
+  if (!exists) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: config.sheets.spreadsheetId,
+      requestBody: { requests: [{ addSheet: { properties: { title: tab } } }] },
+    });
+  }
+
+  // 3) Escribimos los encabezados si la primera fila está vacía.
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.sheets.spreadsheetId,
+    range: `${tab}!A1:F1`,
+  });
+  if (!res.data.values || res.data.values.length === 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: config.sheets.spreadsheetId,
+      range: `${tab}!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [FEEDBACK_HEADERS] },
+    });
+  }
+  feedbackHeaderEnsured = true;
+}
+
+// Agrega una fila con un reporte de retroalimentación del asesor. A diferencia
+// del check-out, aquí SÍ propagamos el error al caller: la ruta necesita saber
+// si el reporte se guardó para responderle al asesor (no es best-effort mudo).
+export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripcion, enviadoPor }) {
+  if (!isConfigured()) {
+    throw new Error("La integración con Google Sheets no está configurada (faltan credenciales o GOOGLE_SHEETS_ID).");
+  }
+  const sheets = await getSheetsClient();
+  await ensureFeedbackTab(sheets);
+  const row = [
+    new Date().toISOString(), // registrado_en
+    idPromotor, // id_promotor
+    nombre, // nombre
+    sucursal, // sucursal
+    descripcion, // descripcion
+    enviadoPor, // enviado_por (ID de la sesión)
+  ];
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: config.sheets.spreadsheetId,
+    range: `${config.sheets.feedbackTab}!A1`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [row] },
+  });
+  return { appended: true };
 }
 
 // Agrega una fila con los datos de la visita completada. Best-effort: nunca
@@ -150,3 +228,4 @@ export async function checkSheetsConnection() {
     };
   }
 }
+

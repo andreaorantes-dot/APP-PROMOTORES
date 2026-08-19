@@ -38,5 +38,8 @@ export const config = {
     keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE ?? "", // o ruta a un archivo JSON
     spreadsheetId: process.env.GOOGLE_SHEETS_ID ?? "",
     tab: process.env.GOOGLE_SHEETS_TAB ?? "Visitas",
+    // Pestaña donde se guarda la retroalimentación (reportes de error) que
+    // envían los asesores desde la app. Se crea sola si no existe.
+    feedbackTab: process.env.GOOGLE_SHEETS_FEEDBACK_TAB ?? "Retroalimentacion",
   },
 };

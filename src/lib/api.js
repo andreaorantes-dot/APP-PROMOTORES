@@ -108,6 +108,15 @@ export const api = {
 
   // Today's visit records for the signed-in promoter.
   visitsToday: (signal) => request("/visits/today", { signal }),
+
+  // --- Retroalimentación --------------------------------------------------
+  // Envía un reporte de error/problema del asesor. Se guarda como una fila en
+  // la pestaña de retroalimentación del Google Sheet del administrador.
+  sendFeedback: ({ idPromotor, nombre, sucursal, descripcion }) =>
+    request("/feedback", {
+      method: "POST",
+      body: { idPromotor, nombre, sucursal, descripcion },
+    }),
 };
 
 export { ApiError };

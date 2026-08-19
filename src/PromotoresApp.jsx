@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
@@ -12,20 +12,70 @@ import {
   readCachedRecords,
 } from "./lib/offlineStore.js";
 
-const COLORS = {
-  bg: "#0F1620",
-  surface: "#161F2B",
-  surface2: "#1D2836",
-  border: "#28323F",
-  text: "#EDF2F7",
-  textMuted: "#8CA0B3",
-  accent: "#FF6B35",
-  accentSoft: "rgba(255,107,53,0.14)",
-  success: "#2DD9A8",
-  successSoft: "rgba(45,217,168,0.14)",
-  danger: "#F2545B",
-  dangerSoft: "rgba(242,84,91,0.14)",
+// ---------------------------------------------------------------------------
+// Paletas de marca Protexa (Manual 2026): Amarillo #F8C000, Negro #221F1C,
+// Blanco #FFFFFF. Dos temas — OSCURO y CLARO — que la app hereda del
+// dispositivo vía `prefers-color-scheme`.
+//
+// Tokens de contraste importantes:
+//   - `accent`     = Amarillo Protexa, SOLO como FONDO de botones/acciones.
+//   - `onAccent`   = texto/ícono SOBRE el amarillo (Negro Protexa).
+//   - `accentText` = color del acento cuando se usa como TEXTO/ícono/borde.
+//                    En oscuro es el amarillo; en claro se oscurece para no
+//                    violar la regla de marca "nunca amarillo sobre blanco".
+// ---------------------------------------------------------------------------
+const PALETTES = {
+  dark: {
+    bg: "#1A1714",
+    surface: "#221F1C", // Negro Protexa
+    surface2: "#2E2A25",
+    border: "#3B352E",
+    text: "#FFFFFF",
+    textMuted: "#B6AE9F",
+    accent: "#F8C000", // Amarillo Protexa
+    accentSoft: "rgba(248,192,0,0.15)",
+    accentText: "#F8C000", // legible sobre superficies oscuras
+    onAccent: "#221F1C", // texto sobre botones amarillos
+    success: "#2DD9A8",
+    successSoft: "rgba(45,217,168,0.14)",
+    onSuccess: "#05231B",
+    danger: "#F2545B",
+    dangerSoft: "rgba(242,84,91,0.14)",
+  },
+  light: {
+    bg: "#FFFFFF",
+    surface: "#FFFFFF",
+    surface2: "#F4F2EE",
+    border: "#E4DFD6",
+    text: "#221F1C", // Negro Protexa
+    textMuted: "#6E675E",
+    accent: "#F8C000", // Amarillo Protexa (fondo de acciones)
+    accentSoft: "rgba(248,192,0,0.20)",
+    accentText: "#221F1C", // en claro el acento-texto es negro (regla: no amarillo sobre blanco)
+    onAccent: "#221F1C", // texto sobre botones amarillos (negro, alto contraste)
+    success: "#137A5B",
+    successSoft: "rgba(19,122,91,0.12)",
+    onSuccess: "#FFFFFF",
+    danger: "#C0343E",
+    dangerSoft: "rgba(192,52,62,0.10)",
+  },
 };
+
+// Detecta el esquema del dispositivo (claro/oscuro). Por defecto: oscuro.
+function detectScheme() {
+  if (typeof window !== "undefined" && window.matchMedia) {
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  return "dark";
+}
+
+// Objeto de color VIVO: mantiene la MISMA referencia y se actualiza in-place al
+// cambiar el tema, de modo que todos los estilos en línea (que leen COLORS.x en
+// cada render) tomen los nuevos valores cuando el árbol se vuelve a renderizar.
+const COLORS = { ...PALETTES[detectScheme()] };
+function applyScheme(scheme) {
+  Object.assign(COLORS, PALETTES[scheme] || PALETTES.dark);
+}
 
 // NOTE: PROMOTERS, GOOGLE_ACCOUNTS and GOOGLE_DOMAIN have been removed.
 // Identity now comes from Google Workspace (OIDC) and the promoter's assigned
@@ -132,7 +182,7 @@ function Stepper({ label, value, onChange }) {
         <span style={{ fontFamily: "JetBrains Mono", fontSize: 18, fontWeight: 600, color: COLORS.text, minWidth: 28, textAlign: "center" }}>{value}</span>
         <button
           onClick={() => onChange(value + 1)}
-          style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${COLORS.accent}`, background: COLORS.accentSoft, color: COLORS.accent, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+          style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${COLORS.accent}`, background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
         >
           <Plus size={16} />
         </button>
@@ -144,7 +194,7 @@ function Stepper({ label, value, onChange }) {
 function Radar({ distance, inRange, gpsError, hasFix }) {
   // Sin fix GPS todavía (o error): estado neutro/alerta, no "fuera de rango".
   const waiting = !hasFix;
-  const statusColor = gpsError ? COLORS.danger : inRange ? COLORS.success : waiting ? COLORS.textMuted : COLORS.accent;
+  const statusColor = gpsError ? COLORS.danger : inRange ? COLORS.success : waiting ? COLORS.textMuted : COLORS.accentText;
   const label = gpsError ? "SIN UBICACIÓN" : waiting ? "BUSCANDO GPS…" : inRange ? "DENTRO DEL RANGO" : "FUERA DE RANGO";
   return (
     <div style={{ position: "relative", width: 220, height: 220, margin: "0 auto" }}>
@@ -175,6 +225,28 @@ function Radar({ distance, inRange, gpsError, hasFix }) {
 export default function PromotoresApp() {
   useGoogleFonts();
 
+  // Tema claro/oscuro heredado del dispositivo (prefers-color-scheme). Al
+  // cambiar el esquema del sistema, se actualiza la paleta VIVA (in-place) y se
+  // fuerza un re-render para que toda la UI adopte el nuevo tema al instante.
+  const [scheme, setScheme] = useState(detectScheme());
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = (e) => {
+      const s = e.matches ? "light" : "dark";
+      applyScheme(s);
+      setScheme(s);
+    };
+    applyScheme(scheme); // asegura sincronía inicial
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else mq.addListener(onChange); // Safari antiguo
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else mq.removeListener(onChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const { status, user, error: authError, login, logout } = useAuth();
 
   const [screen, setScreen] = useState("dashboard");
@@ -198,6 +270,7 @@ export default function PromotoresApp() {
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
   const [gpsError, setGpsError] = useState(null);
   const [showSheet, setShowSheet] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false); // modal de retroalimentación
   const [rollos, setRollos] = useState(0);
   const [cubetas, setCubetas] = useState(0);
   const [photo, setPhoto] = useState(null); // foto de check-in (Base64), obligatoria
@@ -532,7 +605,7 @@ export default function PromotoresApp() {
         <div style={{ width: "100%", maxWidth: 360, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: "32px 28px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
             <div style={{ width: 34, height: 34, borderRadius: 9, background: COLORS.accentSoft, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Navigation size={17} color={COLORS.accent} />
+              <Navigation size={17} color={COLORS.accentText} />
             </div>
             <span style={{ fontFamily: "Inter", fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>PROMOTORES DE CAMPO</span>
           </div>
@@ -571,7 +644,7 @@ export default function PromotoresApp() {
           <button
             onClick={handleLogin}
             disabled={loggingIn || !promoterId.trim() || !password}
-            style={{ width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 10, border: "none", background: promoterId.trim() && password ? COLORS.accent : COLORS.surface2, color: promoterId.trim() && password ? "#1A0D05" : COLORS.textMuted, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: loggingIn || !promoterId.trim() || !password ? "not-allowed" : "pointer" }}
+            style={{ width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 10, border: "none", background: promoterId.trim() && password ? COLORS.accent : COLORS.surface2, color: promoterId.trim() && password ? COLORS.onAccent : COLORS.textMuted, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: loggingIn || !promoterId.trim() || !password ? "not-allowed" : "pointer" }}
           >
             {loggingIn ? "Ingresando…" : "Iniciar sesión"}
           </button>
@@ -588,8 +661,9 @@ export default function PromotoresApp() {
   if (screen === "dashboard") {
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onLogout={handleLogout} />
+        <TopBar user={user} onLogout={handleLogout} onFeedback={() => setShowFeedback(true)} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
         <div style={{ padding: "20px 20px 32px", maxWidth: 480, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>
@@ -658,8 +732,9 @@ export default function PromotoresApp() {
     const isCheckedIn = record?.status === "checked-in";
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onLogout={handleLogout} />
+        <TopBar user={user} onLogout={handleLogout} onFeedback={() => setShowFeedback(true)} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
         <div style={{ padding: "18px 20px 40px", maxWidth: 460, margin: "0 auto" }}>
           <button onClick={() => setScreen("dashboard")} style={{ background: "none", border: "none", color: COLORS.textMuted, display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14 }}>
             <ArrowLeft size={15} /> Tiendas
@@ -710,7 +785,7 @@ export default function PromotoresApp() {
                       disabled={photoBusy}
                       style={{ width: "100%", marginTop: 10, padding: "13px 0", borderRadius: 12, border: `1px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
                     >
-                      <Camera size={16} color={COLORS.accent} />
+                      <Camera size={16} color={COLORS.accentText} />
                       {photoBusy ? "Procesando…" : "Tomar foto"}
                     </button>
                   ) : (
@@ -734,7 +809,7 @@ export default function PromotoresApp() {
                   style={{
                     width: "100%", marginTop: 16, padding: "14px 0", borderRadius: 12, border: "none",
                     background: gpsCoords && photo ? COLORS.accent : COLORS.surface2,
-                    color: gpsCoords && photo ? "#1A0D05" : COLORS.textMuted,
+                    color: gpsCoords && photo ? COLORS.onAccent : COLORS.textMuted,
                     fontFamily: "Inter", fontWeight: 600, fontSize: 15, cursor: gpsCoords && photo && !busy ? "pointer" : "not-allowed",
                   }}
                 >
@@ -756,7 +831,7 @@ export default function PromotoresApp() {
                   style={{
                     width: "100%", marginTop: 20, padding: "14px 0", borderRadius: 12, border: "none",
                     background: gpsCoords ? COLORS.success : COLORS.surface2,
-                    color: gpsCoords ? "#052E24" : COLORS.textMuted,
+                    color: gpsCoords ? COLORS.onSuccess : COLORS.textMuted,
                     fontFamily: "Inter", fontWeight: 600, fontSize: 15, cursor: gpsCoords ? "pointer" : "not-allowed",
                   }}
                 >
@@ -828,7 +903,7 @@ export default function PromotoresApp() {
                   style={{
                     flex: 2, padding: "12px 0", borderRadius: 10, border: "none",
                     background: gpsCoords ? COLORS.success : COLORS.surface2,
-                    color: gpsCoords ? "#052E24" : COLORS.textMuted,
+                    color: gpsCoords ? COLORS.onSuccess : COLORS.textMuted,
                     fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: gpsCoords && !busy ? "pointer" : "not-allowed",
                   }}
                 >
@@ -845,12 +920,12 @@ export default function PromotoresApp() {
   return null;
 }
 
-function TopBar({ user, onLogout }) {
+function TopBar({ user, onLogout, onFeedback }) {
   const initials = (user.name || user.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${COLORS.border}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 32, height: 32, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, fontFamily: "Inter" }}>
+        <div style={{ width: 32, height: 32, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, fontFamily: "Inter" }}>
           {initials}
         </div>
         <div>
@@ -858,9 +933,20 @@ function TopBar({ user, onLogout }) {
           <p style={{ margin: 0, fontSize: 11, color: COLORS.textMuted, fontFamily: "JetBrains Mono" }}>{user.id}{user.location ? ` · ${user.location}` : ""}</p>
         </div>
       </div>
-      <button onClick={onLogout} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: `1px solid ${COLORS.border}`, borderRadius: 9, padding: "7px 12px", color: COLORS.textMuted, fontSize: 12.5, cursor: "pointer" }}>
-        <LogOut size={14} /> Cerrar sesion
-      </button>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {onFeedback && (
+          <button
+            onClick={onFeedback}
+            title="Reportar un problema"
+            style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.accentSoft, border: `1px solid ${COLORS.accent}`, borderRadius: 9, padding: "7px 12px", color: COLORS.accentText, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+          >
+            <MessageSquare size={14} /> Reportar
+          </button>
+        )}
+        <button onClick={onLogout} title="Cerrar sesión" style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: `1px solid ${COLORS.border}`, borderRadius: 9, padding: "7px 10px", color: COLORS.textMuted, fontSize: 12.5, cursor: "pointer" }}>
+          <LogOut size={14} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -869,7 +955,7 @@ function ConnectivityBanner({ online, pending, syncing, onSync }) {
   if (online && pending === 0) return null; // todo sincronizado y con red: sin banner
   const offline = !online;
   const bg = offline ? COLORS.dangerSoft : COLORS.accentSoft;
-  const color = offline ? COLORS.danger : COLORS.accent;
+  const color = offline ? COLORS.danger : COLORS.accentText;
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "8px 14px", background: bg, color, fontSize: 12.5, fontWeight: 600 }}>
       {offline ? <WifiOff size={14} /> : <RefreshCw size={14} />}
@@ -896,7 +982,7 @@ function ConnectivityBanner({ online, pending, syncing, onSync }) {
 function StatusPill({ status }) {
   const map = {
     none: { label: "Sin visitar", color: COLORS.textMuted, bg: COLORS.surface2 },
-    in: { label: "En tienda", color: COLORS.accent, bg: COLORS.accentSoft },
+    in: { label: "En tienda", color: COLORS.accentText, bg: COLORS.accentSoft },
     done: { label: "Completada", color: COLORS.success, bg: COLORS.successSoft },
   };
   const s = map[status];
@@ -912,6 +998,178 @@ function Row({ label, value, last }) {
     <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: last ? "none" : `1px solid ${COLORS.border}` }}>
       <span style={{ fontSize: 13, color: COLORS.textMuted }}>{label}</span>
       <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, fontFamily: "JetBrains Mono" }}>{value}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FeedbackModal — reporte de retroalimentación del asesor.
+// ---------------------------------------------------------------------------
+// Modal (bottom-sheet, como el reporte de salida) donde el asesor describe un
+// problema. ID y nombre vienen autollenados desde la sesión pero son editables;
+// la sucursal se escribe a mano (para poder reportar sucursales que no aparecen
+// en el catálogo) y la descripción es un campo amplio. Al enviar, se guarda una
+// fila en la pestaña de retroalimentación del Google Sheet.
+function FeedbackModal({ user, onClose }) {
+  const [idPromotor, setIdPromotor] = useState(user?.id ?? "");
+  const [nombre, setNombre] = useState(user?.name ?? "");
+  const [sucursal, setSucursal] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+  const [state, setState] = useState("idle"); // idle | sending | sent | error
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const canSend = sucursal.trim().length > 0 && descripcion.trim().length > 0 && state !== "sending";
+
+  async function handleSubmit() {
+    if (!canSend) return;
+    setState("sending");
+    setErrorMsg("");
+    try {
+      await api.sendFeedback({
+        idPromotor: idPromotor.trim(),
+        nombre: nombre.trim(),
+        sucursal: sucursal.trim(),
+        descripcion: descripcion.trim(),
+      });
+      setState("sent");
+    } catch (e) {
+      setState("error");
+      setErrorMsg(
+        e instanceof ApiError
+          ? e.message
+          : "No hay conexión. Revisa tu internet e inténtalo de nuevo."
+      );
+    }
+  }
+
+  const labelStyle = { fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 };
+  const fieldWrap = { background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14 };
+  const inputStyle = { background: "transparent", border: "none", outline: "none", color: COLORS.text, fontFamily: "Inter", fontSize: 15, width: "100%" };
+
+  return (
+    <div
+      onClick={() => state !== "sending" && onClose()}
+      style={{ position: "fixed", inset: 0, background: "rgba(5,8,12,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: "100%", maxWidth: 460, maxHeight: "92dvh", overflowY: "auto", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "22px 22px 26px" }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: COLORS.border, margin: "0 auto 18px" }} />
+
+        {state === "sent" ? (
+          <div style={{ textAlign: "center", padding: "10px 0 6px" }}>
+            <div style={{ width: 48, height: 48, borderRadius: "50%", background: COLORS.successSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+              <Check size={24} color={COLORS.success} />
+            </div>
+            <h3 style={{ fontFamily: "Space Grotesk", fontSize: 18, fontWeight: 600, color: COLORS.text, margin: "0 0 6px" }}>¡Gracias por tu reporte!</h3>
+            <p style={{ fontSize: 13, color: COLORS.textMuted, margin: "0 0 20px", lineHeight: 1.5 }}>
+              Tu retroalimentación se registró. El equipo de Inteligencia Comercial la revisará.
+            </p>
+            <button
+              onClick={onClose}
+              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: "pointer" }}
+            >
+              Cerrar
+            </button>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>
+              <div>
+                <h3 style={{ fontFamily: "Space Grotesk", fontSize: 17, fontWeight: 600, color: COLORS.text, margin: "0 0 4px" }}>Reportar un problema</h3>
+                <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 18px", lineHeight: 1.5 }}>
+                  Cuéntanos qué pasó con el mayor detalle posible para poder ayudarte.
+                </p>
+              </div>
+              <button
+                onClick={() => state !== "sending" && onClose()}
+                aria-label="Cerrar"
+                style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>ID del promotor</label>
+                <div style={fieldWrap}>
+                  <input
+                    value={idPromotor}
+                    onChange={(e) => setIdPromotor(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="987654"
+                    style={{ ...inputStyle, fontFamily: "JetBrains Mono", fontSize: 15 }}
+                  />
+                </div>
+              </div>
+              <div style={{ flex: 1.4 }}>
+                <label style={labelStyle}>Nombre</label>
+                <div style={fieldWrap}>
+                  <input
+                    value={nombre}
+                    onChange={(e) => setNombre(e.target.value)}
+                    placeholder="Nombre del asesor"
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <label style={labelStyle}>Sucursal</label>
+            <div style={fieldWrap}>
+              <input
+                value={sucursal}
+                onChange={(e) => setSucursal(e.target.value)}
+                placeholder="Ej. Morelia, Michoacán"
+                style={inputStyle}
+              />
+            </div>
+
+            <label style={labelStyle}>Describe el problema</label>
+            <div style={{ ...fieldWrap, padding: "10px 12px" }}>
+              <textarea
+                value={descripcion}
+                onChange={(e) => setDescripcion(e.target.value)}
+                rows={5}
+                maxLength={4000}
+                placeholder="Ej. Estoy en la sucursal de Morelia en Michoacán y no he logrado hacer el check in porque no me aparece mi sucursal. ¿Qué puedo hacer?"
+                style={{ ...inputStyle, resize: "vertical", minHeight: 96, lineHeight: 1.5, display: "block" }}
+              />
+            </div>
+
+            {state === "error" && (
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.dangerSoft, color: COLORS.danger, borderRadius: 10, padding: "10px 12px", fontSize: 12.5, lineHeight: 1.4, marginBottom: 14 }}>
+                <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+              <button
+                onClick={() => state !== "sending" && onClose()}
+                style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.textMuted, fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!canSend}
+                style={{
+                  flex: 2, padding: "12px 0", borderRadius: 10, border: "none",
+                  background: canSend ? COLORS.accent : COLORS.surface2,
+                  color: canSend ? COLORS.onAccent : COLORS.textMuted,
+                  fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: canSend ? "pointer" : "not-allowed",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}
+              >
+                {state === "sending" ? "Enviando…" : (<><Send size={15} /> Enviar reporte</>)}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
