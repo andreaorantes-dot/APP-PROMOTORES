@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
@@ -156,17 +156,9 @@ function resizeImage(file, maxDim = 1024, quality = 0.7) {
   });
 }
 
-function useGoogleFonts() {
-  useEffect(() => {
-    const id = "promotores-fonts";
-    if (document.getElementById(id)) return;
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href = "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap";
-    document.head.appendChild(link);
-  }, []);
-}
+// La tipografía de marca es Helvetica (fuente de sistema); no se cargan fuentes
+// web. Se conserva el hook como no-op para no tocar el resto del componente.
+function useGoogleFonts() {}
 
 function Stepper({ label, value, onChange }) {
   return (
@@ -271,6 +263,13 @@ export default function PromotoresApp() {
   const [gpsError, setGpsError] = useState(null);
   const [showSheet, setShowSheet] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false); // modal de retroalimentación
+
+  // Formulario de Competencia (interfaz; la persistencia se conecta después).
+  const [compMarca, setCompMarca] = useState("");
+  const [compDesc, setCompDesc] = useState("");
+  const [compFotos, setCompFotos] = useState([]); // data URLs (previsualización)
+  const [compSent, setCompSent] = useState(false);
+  const compFileRef = useRef(null);
   const [rollos, setRollos] = useState(0);
   const [cubetas, setCubetas] = useState(0);
   const [photo, setPhoto] = useState(null); // foto de check-in (Base64), obligatoria
@@ -583,6 +582,25 @@ export default function PromotoresApp() {
     setPassword("");
   }
 
+  // Navegación entre las secciones del footer.
+  function goTab(key) {
+    setSelectedStore(null);
+    setScreen(key);
+  }
+
+  // Fotos del formulario de Competencia (previsualización en el cliente).
+  async function handleCompFotos(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    for (const file of files) {
+      try {
+        setCompFotos((prev) => [...prev, { name: file.name, url: URL.createObjectURL(file) }]);
+      } catch {
+        /* ignora archivos inválidos */
+      }
+    }
+  }
+
   const bgTexture = {
     backgroundColor: COLORS.bg,
     backgroundImage: `linear-gradient(${COLORS.border}22 1px, transparent 1px), linear-gradient(90deg, ${COLORS.border}22 1px, transparent 1px)`,
@@ -661,10 +679,10 @@ export default function PromotoresApp() {
   if (screen === "dashboard") {
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onLogout={handleLogout} onFeedback={() => setShowFeedback(true)} />
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
-        <div style={{ padding: "20px 20px 32px", maxWidth: 480, margin: "0 auto" }}>
+        <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>
               TIENDAS CERCANAS {dashCoords ? `(${(nearbyRadius / 1000).toFixed(nearbyRadius % 1000 ? 1 : 0)} km)` : ""}
@@ -722,6 +740,7 @@ export default function PromotoresApp() {
             })}
           </div>
         </div>
+        <FooterNav current="dashboard" onNavigate={goTab} />
       </div>
     );
   }
@@ -732,7 +751,7 @@ export default function PromotoresApp() {
     const isCheckedIn = record?.status === "checked-in";
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onLogout={handleLogout} onFeedback={() => setShowFeedback(true)} />
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
         <div style={{ padding: "18px 20px 40px", maxWidth: 460, margin: "0 auto" }}>
@@ -917,23 +936,142 @@ export default function PromotoresApp() {
     );
   }
 
+  // --- Competencia (formulario de acciones/estrategias de la competencia) ---
+  if (screen === "competencia") {
+    const canSendComp = compMarca.trim() && compDesc.trim();
+    return (
+      <div style={{ ...bgTexture, minHeight: "100dvh" }}>
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
+          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>COMPETENCIA</span>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: COLORS.text, margin: "2px 0 4px" }}>Reportar acción</h2>
+          <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 18px", lineHeight: 1.5 }}>
+            Sube estrategias, material gráfico o acciones de la competencia.
+          </p>
+
+          {compSent ? (
+            <div style={{ textAlign: "center", padding: "24px 0" }}>
+              <div style={{ width: 48, height: 48, borderRadius: "50%", background: COLORS.successSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+                <Check size={24} color={COLORS.success} />
+              </div>
+              <p style={{ color: COLORS.text, fontWeight: 600, margin: "0 0 6px" }}>¡Reporte capturado!</p>
+              <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 18px", lineHeight: 1.5 }}>
+                El guardado en el servidor se conectará próximamente (misma integración de fotos que el check-in).
+              </p>
+              <button
+                onClick={() => { setCompSent(false); setCompMarca(""); setCompDesc(""); setCompFotos([]); }}
+                style={{ padding: "11px 20px", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+              >
+                Nuevo reporte
+              </button>
+            </div>
+          ) : (
+            <>
+              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Marca / competidor</label>
+              <div style={{ background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+                <input value={compMarca} onChange={(e) => setCompMarca(e.target.value)} placeholder="Ej. Impermeabilizante XYZ" style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 15, width: "100%" }} />
+              </div>
+
+              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Descripción</label>
+              <div style={{ background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+                <textarea value={compDesc} onChange={(e) => setCompDesc(e.target.value)} rows={4} maxLength={2000} placeholder="Qué observaste: precio, promoción, material…" style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 15, width: "100%", resize: "vertical", minHeight: 80, lineHeight: 1.5, display: "block" }} />
+              </div>
+
+              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Evidencia (fotos)</label>
+              <input ref={compFileRef} type="file" accept="image/*" multiple onChange={handleCompFotos} style={{ display: "none" }} />
+              <button
+                onClick={() => compFileRef.current && compFileRef.current.click()}
+                style={{ width: "100%", padding: "16px 0", borderRadius: 12, border: `1.5px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+              >
+                <ImagePlus size={16} color={COLORS.accentText} /> Subir fotos
+              </button>
+              {compFotos.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                  {compFotos.map((f, i) => (
+                    <div key={i} style={{ position: "relative", width: 72, height: 72, borderRadius: 10, overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
+                      <img src={f.url} alt={f.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <button
+                        onClick={() => setCompFotos((prev) => prev.filter((_, j) => j !== i))}
+                        style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => canSendComp && setCompSent(true)}
+                disabled={!canSendComp}
+                style={{ width: "100%", marginTop: 18, padding: "14px 0", borderRadius: 12, border: "none", background: canSendComp ? COLORS.accent : COLORS.surface2, color: canSendComp ? COLORS.onAccent : COLORS.textMuted, fontWeight: 700, fontSize: 15, cursor: canSendComp ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+              >
+                <Send size={16} /> Enviar reporte
+              </button>
+              <p style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 10, lineHeight: 1.5 }}>
+                Nota: la interfaz está lista; el guardado en el servidor (info + fotos) se conectará en la siguiente fase.
+              </p>
+            </>
+          )}
+        </div>
+        <FooterNav current="competencia" onNavigate={goTab} />
+      </div>
+    );
+  }
+
+  // --- Perfil ---------------------------------------------------------------
+  if (screen === "perfil") {
+    const initials = (user.name || user.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
+    return (
+      <div style={{ ...bgTexture, minHeight: "100dvh" }}>
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        <div style={{ padding: "28px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
+          <div style={{ width: 64, height: 64, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, margin: "0 auto 12px" }}>
+            {initials}
+          </div>
+          <h2 style={{ textAlign: "center", fontSize: 19, fontWeight: 700, color: COLORS.text, margin: "0 0 2px" }}>{user.name}</h2>
+          <p style={{ textAlign: "center", fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 22px" }}>Promotor de campo</p>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "6px 16px" }}>
+            <Row label="ID" value={user.id} />
+            <Row label="Ubicación" value={user.location || "—"} />
+            <Row label="Supervisor" value={user.supervisor || "—"} last />
+          </div>
+          <button
+            onClick={handleLogout}
+            style={{ width: "100%", marginTop: 18, padding: "13px 0", borderRadius: 12, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.text, fontWeight: 600, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+          >
+            <LogOut size={16} /> Cerrar sesión
+          </button>
+        </div>
+        <FooterNav current="perfil" onNavigate={goTab} />
+      </div>
+    );
+  }
+
   return null;
 }
 
-function TopBar({ user, onLogout, onFeedback }) {
+// Wordmark de marca. PROVISIONAL: cuando llegue el logo oficial de Protexa
+// (SVG/PNG positivo y negativo) se reemplaza SOLO aquí por un <img>.
+function Brand() {
+  return (
+    <div style={{ lineHeight: 1 }}>
+      <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: "0.06em", color: COLORS.accentText }}>PROTEXA</div>
+      <div style={{ fontSize: 8, letterSpacing: "0.22em", color: COLORS.textMuted, marginTop: 3 }}>DESDE 1945</div>
+    </div>
+  );
+}
+
+function TopBar({ user, onFeedback, onProfile }) {
   const initials = (user.name || user.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${COLORS.border}` }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: `1px solid ${COLORS.border}` }}>
+      <Brand />
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 32, height: 32, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, fontFamily: "Inter" }}>
-          {initials}
-        </div>
-        <div>
-          <p style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: COLORS.text }}>{user.name}</p>
-          <p style={{ margin: 0, fontSize: 11, color: COLORS.textMuted, fontFamily: "JetBrains Mono" }}>{user.id}{user.location ? ` · ${user.location}` : ""}</p>
-        </div>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {onFeedback && (
           <button
             onClick={onFeedback}
@@ -943,9 +1081,47 @@ function TopBar({ user, onLogout, onFeedback }) {
             <MessageSquare size={14} /> Reportar
           </button>
         )}
-        <button onClick={onLogout} title="Cerrar sesión" style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: `1px solid ${COLORS.border}`, borderRadius: 9, padding: "7px 10px", color: COLORS.textMuted, fontSize: 12.5, cursor: "pointer" }}>
-          <LogOut size={14} />
+        <button
+          onClick={onProfile}
+          title="Mi perfil"
+          style={{ width: 34, height: 34, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 700, border: "none", cursor: "pointer" }}
+        >
+          {initials}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Barra de navegación inferior (footer). Capacitación y Soporte quedan
+// deshabilitadas por ahora (se implementan después).
+function FooterNav({ current, onNavigate }) {
+  const items = [
+    { key: "dashboard", label: "Inicio", Icon: Home, enabled: true },
+    { key: "competencia", label: "Competencia", Icon: BarChart3, enabled: true },
+    { key: "capacitacion", label: "Capacitación", Icon: GraduationCap, enabled: false },
+    { key: "soporte", label: "Soporte", Icon: LifeBuoy, enabled: false },
+    { key: "perfil", label: "Perfil", Icon: User, enabled: true },
+  ];
+  return (
+    <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, background: COLORS.surface, borderTop: `1px solid ${COLORS.border}`, zIndex: 40, paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", display: "flex" }}>
+        {items.map(({ key, label, Icon, enabled }) => {
+          const active = current === key;
+          const color = active ? COLORS.accentText : COLORS.textMuted;
+          return (
+            <button
+              key={key}
+              onClick={() => enabled && onNavigate(key)}
+              disabled={!enabled}
+              title={enabled ? label : `${label} (próximamente)`}
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 11px", background: "none", border: "none", color, opacity: enabled ? 1 : 0.4, cursor: enabled ? "pointer" : "not-allowed" }}
+            >
+              <Icon size={20} />
+              <span style={{ fontSize: 9.5, fontWeight: 600 }}>{label}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

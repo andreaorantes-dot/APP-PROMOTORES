@@ -26,6 +26,12 @@
       html { -webkit-text-size-adjust: 100%; }
       body { overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; }
       #root { min-height: 100dvh; }
+      /* Tipografía de marca: familia Helvetica en TODA la app. El selector
+         cubre todos los elementos para anular las fuentes puestas en los
+         estilos en línea (h1/h2/span con Space Grotesk, JetBrains Mono, etc.). */
+      body, body * {
+        font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+      }
     </style>
   </head>
   <body>

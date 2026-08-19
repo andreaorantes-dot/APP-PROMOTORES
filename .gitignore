@@ -7,3 +7,15 @@ dist
 # Base de datos de promotores con contraseñas en claro: NUNCA versionar.
 Promotores.csv
 *.csv
+
+.DS_Store
+APP-PROMOTORES.git/
+ssh-keygen*
+.env
+backend/.env
+backend/credentials/
+nuevas-contrasenas-*.csv
+dev.db
+backend/prisma/dev.db
+.DS_Store
+node_modules/

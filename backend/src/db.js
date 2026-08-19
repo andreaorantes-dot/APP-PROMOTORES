@@ -5,6 +5,8 @@
 // consumen las rutas, así que routes/auth no cambian. La foto de la visita se
 // persiste (Base64) en la columna VisitRecord.photo.
 import { prisma, withWriteRetry } from "./prisma.js";
+import { config } from "./config.js";
+import { findPromoterInSheet } from "./promotersSheet.js";
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -12,8 +14,10 @@ function todayKey() {
 
 // --- Promotores ------------------------------------------------------------
 
-// Devuelve el promotor con su hash de contraseña (para verificar el login).
 export async function findPromoterById(promoterId) {
+  if (config.authSource === "sheet") {
+    return findPromoterInSheet(promoterId);
+  }
   return prisma.promoter.findUnique({ where: { id: promoterId } });
 }
 
