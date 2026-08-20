@@ -11,8 +11,14 @@ function required(name, fallback) {
 export const config = {
   port: Number(process.env.PORT ?? 8080),
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
-    // Origen de autenticación: "db" (Prisma) o "sheet" (hash del Google Sheet).
+
+  // Origen de autenticación de promotores: "db" (Prisma, por defecto) o "sheet"
+  // (lee el promotor + su hash bcrypt directamente del Google Sheet).
   authSource: (process.env.AUTH_SOURCE ?? "db").toLowerCase(),
+
+  // Origen del catálogo de tiendas: "db" (Prisma) o "sheet" (sincroniza la
+  // pestaña Tiendas del Sheet hacia la base local).
+  storesSource: (process.env.STORES_SOURCE ?? "db").toLowerCase(),
 
   session: {
     secret: required("SESSION_SECRET", "insecure-dev-secret"),
@@ -40,9 +46,12 @@ export const config = {
     keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE ?? "", // o ruta a un archivo JSON
     spreadsheetId: process.env.GOOGLE_SHEETS_ID ?? "",
     tab: process.env.GOOGLE_SHEETS_TAB ?? "Visitas",
-    promotersTab: process.env.GOOGLE_SHEETS_PROMOTERS_TAB ?? "Promotores",
     // Pestaña donde se guarda la retroalimentación (reportes de error) que
     // envían los asesores desde la app. Se crea sola si no existe.
     feedbackTab: process.env.GOOGLE_SHEETS_FEEDBACK_TAB ?? "Retroalimentacion",
+    // Pestaña de promotores (usada cuando AUTH_SOURCE=sheet).
+    promotersTab: process.env.GOOGLE_SHEETS_PROMOTERS_TAB ?? "Promotores",
+    // Pestaña de tiendas (usada cuando STORES_SOURCE=sheet).
+    tiendasTab: process.env.GOOGLE_SHEETS_TIENDAS_TAB ?? "Tiendas",
   },
 };

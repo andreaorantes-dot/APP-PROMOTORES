@@ -14,9 +14,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { config } from "./config.js";
-
+ 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
-
+ 
 // Encabezados de la hoja (se crean solos si la pestaña está vacía).
 const HEADERS = [
   "registrado_en",
@@ -28,7 +28,7 @@ const HEADERS = [
   "rollos",
   "cubetas",
 ];
-
+ 
 // Encabezados de la pestaña de retroalimentación (reportes de error de los
 // asesores). Se crean solos si la pestaña está vacía.
 const FEEDBACK_HEADERS = [
@@ -38,16 +38,17 @@ const FEEDBACK_HEADERS = [
   "sucursal", // sucursal escrita a mano por el asesor
   "descripcion", // descripción amplia del error/problema
   "enviado_por", // ID de la sesión que envió el reporte (auditoría)
+  "ubicacion", // coordenadas GPS "lat,lng" capturadas al enviar el reporte
 ];
-
+ 
 let sheetsClientPromise = null;
 let headerEnsured = false;
 let feedbackHeaderEnsured = false;
-
+ 
 function isConfigured() {
   return Boolean((config.sheets.json || config.sheets.keyFile) && config.sheets.spreadsheetId);
 }
-
+ 
 // Devuelve el objeto de credenciales del Service Account (desde el JSON en la
 // variable de entorno o desde el archivo). Lanza si no puede obtenerlo.
 function loadCredentials() {
@@ -62,7 +63,7 @@ function loadCredentials() {
   }
   throw new Error("Sin credenciales de Service Account (define GOOGLE_SERVICE_ACCOUNT_JSON o _KEY_FILE).");
 }
-
+ 
 // Cliente de Sheets autenticado con el Service Account (lazy + cacheado).
 async function getSheetsClient() {
   if (!sheetsClientPromise) {
@@ -74,7 +75,7 @@ async function getSheetsClient() {
   }
   return sheetsClientPromise;
 }
-
+ 
 // Escribe la fila de encabezados si la pestaña está vacía (una vez por proceso).
 async function ensureHeader(sheets) {
   if (headerEnsured) return;
@@ -92,7 +93,7 @@ async function ensureHeader(sheets) {
   }
   headerEnsured = true;
 }
-
+ 
 // Crea la pestaña `tab` si aún no existe en el documento y, si está vacía,
 // escribe la fila de encabezados. A diferencia de `ensureHeader` (que asume que
 // la pestaña "Visitas" ya existe), esto es necesario para la pestaña de
@@ -100,14 +101,14 @@ async function ensureHeader(sheets) {
 async function ensureFeedbackTab(sheets) {
   if (feedbackHeaderEnsured) return;
   const tab = config.sheets.feedbackTab;
-
+ 
   // 1) ¿Existe la pestaña? Leemos los títulos de todas las hojas del documento.
   const meta = await sheets.spreadsheets.get({
     spreadsheetId: config.sheets.spreadsheetId,
     fields: "sheets.properties.title",
   });
   const exists = (meta.data.sheets ?? []).some((s) => s.properties?.title === tab);
-
+ 
   // 2) Si no existe, la creamos con un batchUpdate (addSheet).
   if (!exists) {
     await sheets.spreadsheets.batchUpdate({
@@ -115,13 +116,16 @@ async function ensureFeedbackTab(sheets) {
       requestBody: { requests: [{ addSheet: { properties: { title: tab } } }] },
     });
   }
-
-  // 3) Escribimos los encabezados si la primera fila está vacía.
+ 
+  // 3) Encabezados: se escriben si la fila 1 está vacía O si tiene menos
+  //    columnas de las esperadas (auto-reparación al agregar "ubicacion" a una
+  //    pestaña que ya existía con 6 columnas).
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.sheets.spreadsheetId,
-    range: `${tab}!A1:F1`,
+    range: `${tab}!A1:Z1`,
   });
-  if (!res.data.values || res.data.values.length === 0) {
+  const current = (res.data.values && res.data.values[0]) || [];
+  if (current.length < FEEDBACK_HEADERS.length) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: config.sheets.spreadsheetId,
       range: `${tab}!A1`,
@@ -131,11 +135,11 @@ async function ensureFeedbackTab(sheets) {
   }
   feedbackHeaderEnsured = true;
 }
-
+ 
 // Agrega una fila con un reporte de retroalimentación del asesor. A diferencia
 // del check-out, aquí SÍ propagamos el error al caller: la ruta necesita saber
 // si el reporte se guardó para responderle al asesor (no es best-effort mudo).
-export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripcion, enviadoPor }) {
+export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripcion, enviadoPor, ubicacion }) {
   if (!isConfigured()) {
     throw new Error("La integración con Google Sheets no está configurada (faltan credenciales o GOOGLE_SHEETS_ID).");
   }
@@ -148,6 +152,7 @@ export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripc
     sucursal, // sucursal
     descripcion, // descripcion
     enviadoPor, // enviado_por (ID de la sesión)
+    ubicacion || "", // ubicacion (lat,lng)
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId: config.sheets.spreadsheetId,
@@ -158,7 +163,7 @@ export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripc
   });
   return { appended: true };
 }
-
+ 
 // Agrega una fila con los datos de la visita completada. Best-effort: nunca
 // lanza hacia el caller (registra el error y sigue), para no afectar al
 // check-out del promotor.
@@ -193,7 +198,7 @@ export async function appendVisitRow({ promoter, store, record }) {
     return { error: err.message };
   }
 }
-
+ 
 // Diagnóstico para verificar la conexión sin depender de un check-out real.
 // Devuelve si está configurado, el email del Service Account, y si puede leer
 // el documento (título de la hoja) o el error concreto.
@@ -228,4 +233,4 @@ export async function checkSheetsConnection() {
     };
   }
 }
-
+ 

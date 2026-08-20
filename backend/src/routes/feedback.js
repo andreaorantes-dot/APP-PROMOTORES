@@ -11,27 +11,29 @@
 import { Router } from "express";
 import { requireAuth } from "../auth.js";
 import { appendFeedbackRow } from "../sheets.js";
-
+ 
 const router = Router();
 router.use(requireAuth);
-
+ 
 // Límites defensivos para no aceptar payloads anómalos.
 const MAX_ID = 40;
 const MAX_NOMBRE = 120;
 const MAX_SUCURSAL = 160;
 const MAX_DESCRIPCION = 4000;
-
+const MAX_UBICACION = 60; // "lat,lng"
+ 
 function clean(value, max) {
   return String(value ?? "").trim().slice(0, max);
 }
-
+ 
 // POST /api/feedback  { idPromotor, nombre, sucursal, descripcion }
 router.post("/", async (req, res) => {
   const idPromotor = clean(req.body?.idPromotor, MAX_ID);
   const nombre = clean(req.body?.nombre, MAX_NOMBRE);
   const sucursal = clean(req.body?.sucursal, MAX_SUCURSAL);
   const descripcion = clean(req.body?.descripcion, MAX_DESCRIPCION);
-
+  const ubicacion = clean(req.body?.ubicacion, MAX_UBICACION);
+ 
   // La descripción es el corazón del reporte: es obligatoria. La sucursal
   // también, para poder canalizar el problema. ID y nombre se autollenan.
   if (!descripcion) {
@@ -40,7 +42,7 @@ router.post("/", async (req, res) => {
   if (!sucursal) {
     return res.status(400).json({ message: "Indica la sucursal relacionada con el problema." });
   }
-
+ 
   try {
     await appendFeedbackRow({
       idPromotor: idPromotor || req.promoter.id,
@@ -48,6 +50,7 @@ router.post("/", async (req, res) => {
       sucursal,
       descripcion,
       enviadoPor: req.promoter.id, // auditoría: quién está realmente logueado
+      ubicacion, // coordenadas GPS capturadas al enviar el reporte
     });
     return res.status(201).json({ message: "¡Gracias! Tu retroalimentación fue registrada." });
   } catch (err) {
@@ -57,5 +60,6 @@ router.post("/", async (req, res) => {
       .json({ message: "No se pudo guardar tu retroalimentación en este momento. Intenta de nuevo." });
   }
 });
-
+ 
 export default router;
+ 

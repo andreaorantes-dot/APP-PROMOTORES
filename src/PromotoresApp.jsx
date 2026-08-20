@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
@@ -214,6 +214,174 @@ function Radar({ distance, inRange, gpsError, hasFix }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Mapa (OpenStreetMap + Leaflet, cargado desde CDN — gratis, sin API key).
+// Muestra la ubicación real del promotor y, opcionalmente, las tiendas cercanas.
+// ---------------------------------------------------------------------------
+function MapView({ coords, stores = [] }) {
+  const elRef = useRef(null);
+  const mapRef = useRef(null);
+  const userRef = useRef(null);
+  const [ready, setReady] = useState(typeof window !== "undefined" && !!window.L);
+  const [failed, setFailed] = useState(false); // no se pudo cargar Leaflet (p.ej. red bloqueada)
+
+  // Carga Leaflet (CSS + JS) desde CDN una sola vez.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.L) { setReady(true); return; }
+    if (!document.getElementById("leaflet-css")) {
+      const link = document.createElement("link");
+      link.id = "leaflet-css";
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+    let s = document.getElementById("leaflet-js");
+    if (!s) {
+      s = document.createElement("script");
+      s.id = "leaflet-js";
+      s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      s.async = true;
+      document.body.appendChild(s);
+    }
+    s.addEventListener("load", () => setReady(true));
+    s.addEventListener("error", () => setFailed(true));
+    // Si en 8s no cargó Leaflet (red corporativa bloqueando el CDN), marca fallo.
+    const t = setTimeout(() => { if (!window.L) setFailed(true); }, 8000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Limpieza al desmontar.
+  useEffect(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } }, []);
+
+  // Inicializa / actualiza el mapa cuando hay coordenadas.
+  useEffect(() => {
+    const L = window.L;
+    if (!ready || !L || !coords || !elRef.current) return;
+    if (!mapRef.current) {
+      mapRef.current = L.map(elRef.current, { zoomControl: false, attributionControl: true }).setView([coords.lat, coords.lng], 15);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(mapRef.current);
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="color:${COLORS.accent};filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 28],
+      });
+      userRef.current = L.marker([coords.lat, coords.lng], { icon }).addTo(mapRef.current);
+    } else {
+      mapRef.current.setView([coords.lat, coords.lng]);
+      userRef.current.setLatLng([coords.lat, coords.lng]);
+    }
+    setTimeout(() => mapRef.current && mapRef.current.invalidateSize(), 150);
+  }, [ready, coords]);
+
+  // Marcadores de las tiendas cercanas.
+  useEffect(() => {
+    const L = window.L;
+    if (!ready || !L || !mapRef.current) return;
+    mapRef.current.__stores = mapRef.current.__stores || L.layerGroup().addTo(mapRef.current);
+    const layer = mapRef.current.__stores;
+    layer.clearLayers();
+    // Todas las tiendas del catálogo son Home Depot: marcador de círculo naranja
+    // (#F96302) con ícono de casa. El tooltip muestra "Nombre - Número".
+    const hdHtml = `<div style="width:26px;height:26px;border-radius:50%;background:#F96302;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.8V20h14V9.8"/></svg></div>`;
+    for (const s of stores) {
+      if (typeof s.lat !== "number" || typeof s.lng !== "number") continue;
+      const icon = L.divIcon({ className: "", html: hdHtml, iconSize: [26, 26], iconAnchor: [13, 13] });
+      const label = s.id ? `${s.name} - ${s.id}` : s.name;
+      L.marker([s.lat, s.lng], { icon }).bindTooltip(label, { direction: "top" }).addTo(layer);
+    }
+  }, [ready, stores]);
+
+  // Fallback si el mapa no cargó (p.ej. la red bloquea unpkg/OpenStreetMap):
+  // muestra las coordenadas en texto en lugar de un recuadro vacío.
+  if (failed) {
+    return (
+      <div style={{ marginBottom: 14, height: 160, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: COLORS.surface, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, padding: 14, textAlign: "center" }}>
+        <MapPin size={22} color={COLORS.accentText} />
+        <span style={{ fontSize: 13, color: COLORS.text, fontFamily: "JetBrains Mono" }}>
+          {coords ? `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : "Ubicación no disponible"}
+        </span>
+        <span style={{ fontSize: 11, color: COLORS.textMuted, lineHeight: 1.4 }}>
+          El mapa no cargó en esta red. Se verá al desplegar o con otra conexión.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: "relative", marginBottom: 14 }}>
+      <div ref={elRef} style={{ height: 160, borderRadius: 14, overflow: "hidden", border: `1px solid ${COLORS.border}`, background: COLORS.surface2 }} />
+      {!coords && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.textMuted, fontSize: 12.5, pointerEvents: "none" }}>
+          Obteniendo tu ubicación…
+        </div>
+      )}
+    </div>
+  );
+}
+
+// META de ventas (placeholder; conectar a una pestaña "Metas" del Sheet).
+const SALES_GOALS = { rollos: 500, cubetas: 200 };
+
+function GoalBar({ label, actual, meta }) {
+  const pct = Math.min(100, Math.round((actual / meta) * 100) || 0);
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, color: COLORS.text, fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: 12, color: COLORS.textMuted }}>{actual} / {meta} · <b style={{ color: COLORS.accentText }}>{pct}%</b></span>
+      </div>
+      <div style={{ height: 12, borderRadius: 999, background: COLORS.surface2, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, borderRadius: 999, background: `linear-gradient(90deg, ${COLORS.accent}, #ffd84d)`, transition: "width .4s ease" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+        {[25, 50, 75, 100].map((m) => (
+          <span key={m} style={{ fontSize: 8.5, fontWeight: 600, color: pct >= m ? COLORS.accentText : COLORS.textMuted }}>{m === 100 ? "Meta" : `${m}%`}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Barra de meta de ventas con gamificación (nivel + mensaje motivacional).
+// `actual` se suma de las visitas del día; la META es placeholder por ahora.
+function SalesGoals({ records }) {
+  const sums = Object.values(records || {}).reduce(
+    (a, r) => ({ rollos: a.rollos + (r.rollos || 0), cubetas: a.cubetas + (r.cubetas || 0) }),
+    { rollos: 0, cubetas: 0 }
+  );
+  const rPct = Math.min(100, (sums.rollos / SALES_GOALS.rollos) * 100 || 0);
+  const cPct = Math.min(100, (sums.cubetas / SALES_GOALS.cubetas) * 100 || 0);
+  const overall = Math.round((rPct + cPct) / 2);
+  const level = overall >= 75 ? "Nivel Oro" : overall >= 40 ? "Nivel Plata" : "Nivel Bronce";
+  const faltanR = Math.max(0, SALES_GOALS.rollos - sums.rollos);
+  const faltanC = Math.max(0, SALES_GOALS.cubetas - sums.cubetas);
+  const msg =
+    overall >= 100 ? "¡Meta cumplida! Excelente trabajo."
+    : overall >= 75 ? `¡Casi lo logras! Te faltan ${faltanR} rollos y ${faltanC} cubetas.`
+    : overall >= 40 ? `¡Vas muy bien! Te faltan ${faltanR} rollos y ${faltanC} cubetas para tu meta.`
+    : "¡Vamos con todo! Cada visita te acerca a tu meta.";
+  return (
+    <>
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>META DE VENTAS</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.accentSoft, color: COLORS.accentText, fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999 }}>
+            <Trophy size={12} /> {level}
+          </span>
+        </div>
+        <GoalBar label="Rollos" actual={sums.rollos} meta={SALES_GOALS.rollos} />
+        <GoalBar label="Cubetas" actual={sums.cubetas} meta={SALES_GOALS.cubetas} />
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.successSoft, border: `1px solid ${COLORS.success}55`, borderRadius: 12, padding: "10px 12px", marginBottom: 14 }}>
+        <Zap size={16} color={COLORS.success} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span style={{ fontSize: 12, color: COLORS.text, lineHeight: 1.45 }}>{msg}</span>
+      </div>
+    </>
+  );
+}
+
 export default function PromotoresApp() {
   useGoogleFonts();
 
@@ -248,6 +416,7 @@ export default function PromotoresApp() {
 
   // Tiendas cercanas (por GPS). No hay asignación fija por promotor.
   const [nearbyStores, setNearbyStores] = useState([]);
+  const [allStores, setAllStores] = useState([]); // catálogo completo (para el mapa)
   const [nearbyRadius, setNearbyRadius] = useState(2000); // m; lo confirma el server
   const [dashCoords, setDashCoords] = useState(null);
   const [storesLoading, setStoresLoading] = useState(false);
@@ -399,6 +568,17 @@ export default function PromotoresApp() {
     if (status === "authed" && screen === "dashboard") loadNearbyStores();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, screen]);
+
+  // Carga el catálogo COMPLETO de tiendas (para pintarlas todas en el mapa).
+  useEffect(() => {
+    if (status !== "authed") return;
+    const ctrl = new AbortController();
+    api
+      .allStores(ctrl.signal)
+      .then((data) => setAllStores(data?.stores ?? []))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [status]);
 
   // GPS REAL únicamente (sin modo simulación). Observa la ubicación del
   // dispositivo mientras se está en la pantalla de una tienda.
@@ -683,6 +863,11 @@ export default function PromotoresApp() {
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
         <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
+          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>TU UBICACIÓN</span>
+          <MapView coords={dashCoords} stores={allStores} />
+
+          <SalesGoals records={records} />
+
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>
               TIENDAS CERCANAS {dashCoords ? `(${(nearbyRadius / 1000).toFixed(nearbyRadius % 1000 ? 1 : 0)} km)` : ""}
@@ -726,8 +911,10 @@ export default function PromotoresApp() {
                     <MapPin size={18} color={COLORS.textMuted} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: 0, color: COLORS.text, fontSize: 14.5, fontWeight: 600 }}>{s.name}</p>
-                    <p style={{ margin: "2px 0 0", color: COLORS.textMuted, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.address}</p>
+                    <p style={{ margin: 0, color: COLORS.text, fontSize: 14.5, fontWeight: 600 }}>{s.name} - {s.id}</p>
+                    {s.address && s.address !== `Tienda #${s.id}` && (
+                      <p style={{ margin: "2px 0 0", color: COLORS.textMuted, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.address}</p>
+                    )}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                     {typeof s.distance === "number" && (
@@ -1058,11 +1245,13 @@ export default function PromotoresApp() {
 // Wordmark de marca. PROVISIONAL: cuando llegue el logo oficial de Protexa
 // (SVG/PNG positivo y negativo) se reemplaza SOLO aquí por un <img>.
 function Brand() {
+  // Logo oficial Protexa. El navegador elige la versión según el tema del
+  // dispositivo: blanca en modo oscuro, negra en modo claro.
   return (
-    <div style={{ lineHeight: 1 }}>
-      <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: "0.06em", color: COLORS.accentText }}>PROTEXA</div>
-      <div style={{ fontSize: 8, letterSpacing: "0.22em", color: COLORS.textMuted, marginTop: 3 }}>DESDE 1945</div>
-    </div>
+    <picture style={{ display: "flex", alignItems: "center" }}>
+      <source srcSet="/protexa-logo-blanco.png" media="(prefers-color-scheme: dark)" />
+      <img src="/protexa-logo-negro.png" alt="Protexa · Desde 1945" style={{ height: 28, width: "auto", display: "block" }} />
+    </picture>
   );
 }
 
@@ -1096,26 +1285,26 @@ function TopBar({ user, onFeedback, onProfile }) {
 // Barra de navegación inferior (footer). Capacitación y Soporte quedan
 // deshabilitadas por ahora (se implementan después).
 function FooterNav({ current, onNavigate }) {
+  // Capacitación y Soporte abren sus NotebookLM (Google) en una pestaña nueva.
   const items = [
-    { key: "dashboard", label: "Inicio", Icon: Home, enabled: true },
-    { key: "competencia", label: "Competencia", Icon: BarChart3, enabled: true },
-    { key: "capacitacion", label: "Capacitación", Icon: GraduationCap, enabled: false },
-    { key: "soporte", label: "Soporte", Icon: LifeBuoy, enabled: false },
-    { key: "perfil", label: "Perfil", Icon: User, enabled: true },
+    { key: "dashboard", label: "Inicio", Icon: Home },
+    { key: "competencia", label: "Competencia", Icon: BarChart3 },
+    { key: "capacitacion", label: "Capacitación", Icon: GraduationCap, href: "https://notebook.google.com/notebook/a632f11d-4361-410d-add1-410cfa806e34/preview" },
+    { key: "soporte", label: "Soporte", Icon: LifeBuoy, href: "https://notebook.google.com/notebook/8587af76-29d1-489b-8442-725daabceb69/preview" },
+    { key: "perfil", label: "Perfil", Icon: User },
   ];
   return (
     <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, background: COLORS.surface, borderTop: `1px solid ${COLORS.border}`, zIndex: 40, paddingBottom: "env(safe-area-inset-bottom)" }}>
       <div style={{ maxWidth: 480, margin: "0 auto", display: "flex" }}>
-        {items.map(({ key, label, Icon, enabled }) => {
+        {items.map(({ key, label, Icon, href }) => {
           const active = current === key;
           const color = active ? COLORS.accentText : COLORS.textMuted;
           return (
             <button
               key={key}
-              onClick={() => enabled && onNavigate(key)}
-              disabled={!enabled}
-              title={enabled ? label : `${label} (próximamente)`}
-              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 11px", background: "none", border: "none", color, opacity: enabled ? 1 : 0.4, cursor: enabled ? "pointer" : "not-allowed" }}
+              onClick={() => (href ? window.open(href, "_blank", "noopener,noreferrer") : onNavigate(key))}
+              title={label}
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 11px", background: "none", border: "none", color, cursor: "pointer" }}
             >
               <Icon size={20} />
               <span style={{ fontSize: 9.5, fontWeight: 600 }}>{label}</span>
@@ -1193,6 +1382,20 @@ function FeedbackModal({ user, onClose }) {
   const [descripcion, setDescripcion] = useState("");
   const [state, setState] = useState("idle"); // idle | sending | sent | error
   const [errorMsg, setErrorMsg] = useState("");
+  const [loc, setLoc] = useState({ status: "loading", coords: null }); // ubicación en tiempo real
+
+  // Captura la ubicación GPS real al abrir el modal.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLoc({ status: "error", coords: null });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setLoc({ status: "ok", coords: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
+      () => setLoc({ status: "error", coords: null }),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+    );
+  }, []);
 
   const canSend = sucursal.trim().length > 0 && descripcion.trim().length > 0 && state !== "sending";
 
@@ -1206,6 +1409,7 @@ function FeedbackModal({ user, onClose }) {
         nombre: nombre.trim(),
         sucursal: sucursal.trim(),
         descripcion: descripcion.trim(),
+        ubicacion: loc.coords ? `${loc.coords.lat.toFixed(6)},${loc.coords.lng.toFixed(6)}` : "",
       });
       setState("sent");
     } catch (e) {
@@ -1301,6 +1505,23 @@ function FeedbackModal({ user, onClose }) {
                 placeholder="Ej. Morelia, Michoacán"
                 style={inputStyle}
               />
+            </div>
+
+            <label style={labelStyle}>Ubicación (en tiempo real)</label>
+            <div style={{ ...fieldWrap, display: "flex", alignItems: "center", gap: 9 }}>
+              <MapPin size={16} color={loc.status === "ok" ? COLORS.accentText : COLORS.textMuted} style={{ flexShrink: 0 }} />
+              <span style={{ color: loc.status === "ok" ? COLORS.text : COLORS.textMuted, fontSize: 13.5, fontFamily: "JetBrains Mono" }}>
+                {loc.status === "ok"
+                  ? `${loc.coords.lat.toFixed(4)}, ${loc.coords.lng.toFixed(4)}`
+                  : loc.status === "loading"
+                  ? "Obteniendo ubicación…"
+                  : "Ubicación no disponible"}
+              </span>
+              {loc.status === "ok" && (
+                <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4, color: COLORS.success, fontSize: 11, fontWeight: 700 }}>
+                  <Check size={13} /> Capturada
+                </span>
+              )}
             </div>
 
             <label style={labelStyle}>Describe el problema</label>
