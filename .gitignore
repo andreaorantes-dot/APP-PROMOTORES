@@ -18,3 +18,5 @@ nuevas-contrasenas-*.csv
 dev.db
 backend/prisma/dev.db
 node_modules/
+.env
+node_modules/
