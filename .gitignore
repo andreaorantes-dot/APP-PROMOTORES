@@ -10,4 +10,11 @@ Promotores.csv
 .DS_Store
 *.pub
 1234
-.env
+APP-PROMOTORES.git/
+ssh-keygen*
+backend/.env
+backend/credentials/
+nuevas-contrasenas-*.csv
+dev.db
+backend/prisma/dev.db
+node_modules/

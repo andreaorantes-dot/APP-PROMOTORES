@@ -36,4 +36,11 @@ router.get("/", async (req, res) => {
   return res.json({ radius, stores: nearby });
 });
 
+// GET /api/stores/all -> TODAS las tiendas del catálogo (para pintarlas en el
+// mapa de Inicio, sin filtro de distancia).
+router.get("/all", async (req, res) => {
+  const stores = await getAllStores();
+  return res.json({ stores });
+});
+
 export default router;

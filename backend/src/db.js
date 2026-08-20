@@ -5,6 +5,9 @@
 // consumen las rutas, así que routes/auth no cambian. La foto de la visita se
 // persiste (Base64) en la columna VisitRecord.photo.
 import { prisma, withWriteRetry } from "./prisma.js";
+import { config } from "./config.js";
+import { findPromoterInSheet } from "./promotersSheet.js";
+import { ensureStoresSynced } from "./storesSheet.js";
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -13,14 +16,22 @@ function todayKey() {
 // --- Promotores ------------------------------------------------------------
 
 // Devuelve el promotor con su hash de contraseña (para verificar el login).
+// Con AUTH_SOURCE=sheet lee del Google Sheet (hash bcrypt en la columna
+// CONTRASEÑA); de lo contrario, de la base local (Prisma). En ambos casos
+// devuelve la misma forma { id, name, location, supervisor, password }.
 export async function findPromoterById(promoterId) {
+  if (config.authSource === "sheet") {
+    return findPromoterInSheet(promoterId);
+  }
   return prisma.promoter.findUnique({ where: { id: promoterId } });
 }
 
 // --- Tiendas (catálogo global) --------------------------------------------
 
 // Todas las tiendas del catálogo. El filtrado por cercanía se hace en la ruta.
+// Con STORES_SOURCE=sheet, primero sincroniza desde la pestaña Tiendas del Sheet.
 export async function getAllStores() {
+  if (config.storesSource === "sheet") await ensureStoresSynced();
   return prisma.store.findMany({
     orderBy: { id: "asc" },
     select: { id: true, name: true, address: true, lat: true, lng: true },
@@ -28,6 +39,7 @@ export async function getAllStores() {
 }
 
 export async function getStore(storeId) {
+  if (config.storesSource === "sheet") await ensureStoresSynced();
   return prisma.store.findUnique({ where: { id: storeId } });
 }
 

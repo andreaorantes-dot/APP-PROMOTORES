@@ -91,6 +91,9 @@ export const api = {
   nearbyStores: (lat, lng, signal) =>
     request(`/stores?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`, { signal }),
 
+  // Todas las tiendas del catálogo (para pintarlas en el mapa de Inicio).
+  allStores: (signal) => request("/stores/all", { signal }),
+
   // --- Visits (server-authoritative) -------------------------------------
   // The client sends its coordinates, but the SERVER re-validates distance,
   // time, and identity before persisting. Never trust the browser for this.
@@ -108,6 +111,15 @@ export const api = {
 
   // Today's visit records for the signed-in promoter.
   visitsToday: (signal) => request("/visits/today", { signal }),
+
+  // --- Retroalimentación --------------------------------------------------
+  // Envía un reporte de error/problema del asesor. Se guarda como una fila en
+  // la pestaña de retroalimentación del Google Sheet del administrador.
+  sendFeedback: ({ idPromotor, nombre, sucursal, descripcion, ubicacion }) =>
+    request("/feedback", {
+      method: "POST",
+      body: { idPromotor, nombre, sucursal, descripcion, ubicacion },
+    }),
 };
 
 export { ApiError };
