@@ -68,6 +68,32 @@ export async function submitVisitReport(promoterId, storeId, patch) {
   if (typeof data.checkInTime === "string") data.checkInTime = new Date(data.checkInTime);
   if (typeof data.checkOutTime === "string") data.checkOutTime = new Date(data.checkOutTime);
 
+  // VisitRecord tiene llave foránea a Promoter. Con AUTH_SOURCE=sheet la tabla
+  // Promoter de Postgres queda vacía (los promotores viven en el Sheet), así que
+  // el check-in violaría la restricción y la visita no se guardaría. Aquí se
+  // asegura una copia mínima del promotor (con su hash del Sheet) antes del
+  // upsert de la visita. Es idempotente y no sube contraseñas en claro a Render.
+  if (config.authSource === "sheet") {
+    const p = await findPromoterInSheet(promoterId);
+    if (p) {
+      await prisma.promoter.upsert({
+        where: { id: p.id },
+        update: {},
+        create: {
+          id: p.id,
+          name: p.name || p.id,
+          location: p.location ?? null,
+          supervisor: p.supervisor ?? null,
+          password: p.password ?? "",
+        },
+      });
+    }
+  }
+
+  // Con STORES_SOURCE=sheet, la tienda también debe existir en Postgres por la
+  // FK a Store. ensureStoresSynced() es idempotente y cachea, así que es barato.
+  if (config.storesSource === "sheet") await ensureStoresSynced();
+
   // withWriteRetry: reintenta ante bloqueos de SQLite bajo carga concurrente.
   return withWriteRetry(() =>
     prisma.visitRecord.upsert({
