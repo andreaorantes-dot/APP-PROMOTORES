@@ -68,11 +68,10 @@ export async function submitVisitReport(promoterId, storeId, patch) {
   if (typeof data.checkInTime === "string") data.checkInTime = new Date(data.checkInTime);
   if (typeof data.checkOutTime === "string") data.checkOutTime = new Date(data.checkOutTime);
 
-  // VisitRecord tiene llave foránea a Promoter. Con AUTH_SOURCE=sheet la tabla
-  // Promoter de Postgres queda vacía (los promotores viven en el Sheet), así que
-  // el check-in violaría la restricción y la visita no se guardaría. Aquí se
-  // asegura una copia mínima del promotor (con su hash del Sheet) antes del
-  // upsert de la visita. Es idempotente y no sube contraseñas en claro a Render.
+  // Con AUTH_SOURCE=sheet los promotores viven en el Google Sheet, no en Postgres,
+  // pero VisitRecord tiene una llave foránea a Promoter. Aseguramos que exista la
+  // fila del promotor (con su hash del Sheet) para no violar esa restricción al
+  // guardar la visita. Idempotente: si ya existe, no toca nada.
   if (config.authSource === "sheet") {
     const p = await findPromoterInSheet(promoterId);
     if (p) {
@@ -89,10 +88,6 @@ export async function submitVisitReport(promoterId, storeId, patch) {
       });
     }
   }
-
-  // Con STORES_SOURCE=sheet, la tienda también debe existir en Postgres por la
-  // FK a Store. ensureStoresSynced() es idempotente y cachea, así que es barato.
-  if (config.storesSource === "sheet") await ensureStoresSynced();
 
   // withWriteRetry: reintenta ante bloqueos de SQLite bajo carga concurrente.
   return withWriteRetry(() =>

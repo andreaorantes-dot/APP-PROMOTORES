@@ -27,12 +27,7 @@ ENV SERVE_STATIC=true
 ENV PORT=8080
 EXPOSE 8080
 
-# Crea/actualiza las tablas desde schema.prisma y arranca.
-# NOTA: el repositorio NO tiene carpeta de migraciones (backend/prisma/migrations),
-# por lo que `prisma migrate deploy` no creaba ninguna tabla y la app fallaba al
-# primer query. `db push` sincroniza el esquema directamente. El flag
-# --accept-data-loss evita que el arranque quede esperando una confirmación
-# interactiva (es seguro en una base nueva y vacía: solo crea tablas).
-# El SEED (con los CSV reales) es un paso del operador (ver DEPLOY.md). Con
-# AUTH_SOURCE=sheet y STORES_SOURCE=sheet no hace falta sembrar.
+# Crea/actualiza las tablas directamente desde el esquema (no usamos archivos de
+# migración) y arranca. Con AUTH_SOURCE=sheet y STORES_SOURCE=sheet los datos
+# vienen del Google Sheet en runtime, así que no se siembra desde CSV aquí.
 CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node src/server.js"]
