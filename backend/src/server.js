@@ -12,6 +12,7 @@ import { checkSheetsConnection } from "./sheets.js";
 import authRoutes from "./routes/auth.js";
 import storeRoutes from "./routes/stores.js";
 import visitRoutes from "./routes/visits.js";
+import feedbackRoutes from "./routes/feedback.js";
 
 // Robustez: un error no capturado en una petición NO debe tumbar el servidor
 // (si se cae, TODOS los promotores pierden el servicio). Registramos y seguimos.
@@ -54,6 +55,7 @@ app.get("/api/health", (req, res) => res.json({ ok: true }));
 app.use("/api", authRoutes); // expone /api/login, /api/auth/session, /api/auth/logout
 app.use("/api/stores", storeRoutes); // GET /api/stores?lat&lng (tiendas cercanas)
 app.use("/api/visits", visitRoutes);
+app.use("/api/feedback", feedbackRoutes); // POST /api/feedback (retroalimentación)
 
 // Diagnóstico de Google Sheets (requiere sesión): verifica credenciales y acceso
 // al documento sin necesidad de un check-out real.

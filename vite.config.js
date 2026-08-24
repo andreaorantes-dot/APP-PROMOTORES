@@ -12,6 +12,10 @@ const proxy = {
 
 export default defineConfig({
   plugins: [react()],
-  server: { proxy }, // `npm run dev`
+  server: { 
+    host:true, 
+    allowedHost: true, 
+    proxy, 
+  }, // `npm run dev`
   preview: { proxy }, // `npm run preview` (build de producción + PWA)
 });

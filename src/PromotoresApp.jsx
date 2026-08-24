@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
@@ -12,20 +12,70 @@ import {
   readCachedRecords,
 } from "./lib/offlineStore.js";
 
-const COLORS = {
-  bg: "#0F1620",
-  surface: "#161F2B",
-  surface2: "#1D2836",
-  border: "#28323F",
-  text: "#EDF2F7",
-  textMuted: "#8CA0B3",
-  accent: "#FF6B35",
-  accentSoft: "rgba(255,107,53,0.14)",
-  success: "#2DD9A8",
-  successSoft: "rgba(45,217,168,0.14)",
-  danger: "#F2545B",
-  dangerSoft: "rgba(242,84,91,0.14)",
+// ---------------------------------------------------------------------------
+// Paletas de marca Protexa (Manual 2026): Amarillo #F8C000, Negro #221F1C,
+// Blanco #FFFFFF. Dos temas — OSCURO y CLARO — que la app hereda del
+// dispositivo vía `prefers-color-scheme`.
+//
+// Tokens de contraste importantes:
+//   - `accent`     = Amarillo Protexa, SOLO como FONDO de botones/acciones.
+//   - `onAccent`   = texto/ícono SOBRE el amarillo (Negro Protexa).
+//   - `accentText` = color del acento cuando se usa como TEXTO/ícono/borde.
+//                    En oscuro es el amarillo; en claro se oscurece para no
+//                    violar la regla de marca "nunca amarillo sobre blanco".
+// ---------------------------------------------------------------------------
+const PALETTES = {
+  dark: {
+    bg: "#1A1714",
+    surface: "#221F1C", // Negro Protexa
+    surface2: "#2E2A25",
+    border: "#3B352E",
+    text: "#FFFFFF",
+    textMuted: "#B6AE9F",
+    accent: "#F8C000", // Amarillo Protexa
+    accentSoft: "rgba(248,192,0,0.15)",
+    accentText: "#F8C000", // legible sobre superficies oscuras
+    onAccent: "#221F1C", // texto sobre botones amarillos
+    success: "#2DD9A8",
+    successSoft: "rgba(45,217,168,0.14)",
+    onSuccess: "#05231B",
+    danger: "#F2545B",
+    dangerSoft: "rgba(242,84,91,0.14)",
+  },
+  light: {
+    bg: "#FFFFFF",
+    surface: "#FFFFFF",
+    surface2: "#F4F2EE",
+    border: "#E4DFD6",
+    text: "#221F1C", // Negro Protexa
+    textMuted: "#6E675E",
+    accent: "#F8C000", // Amarillo Protexa (fondo de acciones)
+    accentSoft: "rgba(248,192,0,0.20)",
+    accentText: "#221F1C", // en claro el acento-texto es negro (regla: no amarillo sobre blanco)
+    onAccent: "#221F1C", // texto sobre botones amarillos (negro, alto contraste)
+    success: "#137A5B",
+    successSoft: "rgba(19,122,91,0.12)",
+    onSuccess: "#FFFFFF",
+    danger: "#C0343E",
+    dangerSoft: "rgba(192,52,62,0.10)",
+  },
 };
+
+// Detecta el esquema del dispositivo (claro/oscuro). Por defecto: oscuro.
+function detectScheme() {
+  if (typeof window !== "undefined" && window.matchMedia) {
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  return "dark";
+}
+
+// Objeto de color VIVO: mantiene la MISMA referencia y se actualiza in-place al
+// cambiar el tema, de modo que todos los estilos en línea (que leen COLORS.x en
+// cada render) tomen los nuevos valores cuando el árbol se vuelve a renderizar.
+const COLORS = { ...PALETTES[detectScheme()] };
+function applyScheme(scheme) {
+  Object.assign(COLORS, PALETTES[scheme] || PALETTES.dark);
+}
 
 // NOTE: PROMOTERS, GOOGLE_ACCOUNTS and GOOGLE_DOMAIN have been removed.
 // Identity now comes from Google Workspace (OIDC) and the promoter's assigned
@@ -106,17 +156,9 @@ function resizeImage(file, maxDim = 1024, quality = 0.7) {
   });
 }
 
-function useGoogleFonts() {
-  useEffect(() => {
-    const id = "promotores-fonts";
-    if (document.getElementById(id)) return;
-    const link = document.createElement("link");
-    link.id = id;
-    link.rel = "stylesheet";
-    link.href = "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap";
-    document.head.appendChild(link);
-  }, []);
-}
+// La tipografía de marca es Helvetica (fuente de sistema); no se cargan fuentes
+// web. Se conserva el hook como no-op para no tocar el resto del componente.
+function useGoogleFonts() {}
 
 function Stepper({ label, value, onChange }) {
   return (
@@ -132,7 +174,7 @@ function Stepper({ label, value, onChange }) {
         <span style={{ fontFamily: "JetBrains Mono", fontSize: 18, fontWeight: 600, color: COLORS.text, minWidth: 28, textAlign: "center" }}>{value}</span>
         <button
           onClick={() => onChange(value + 1)}
-          style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${COLORS.accent}`, background: COLORS.accentSoft, color: COLORS.accent, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+          style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${COLORS.accent}`, background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
         >
           <Plus size={16} />
         </button>
@@ -144,7 +186,7 @@ function Stepper({ label, value, onChange }) {
 function Radar({ distance, inRange, gpsError, hasFix }) {
   // Sin fix GPS todavía (o error): estado neutro/alerta, no "fuera de rango".
   const waiting = !hasFix;
-  const statusColor = gpsError ? COLORS.danger : inRange ? COLORS.success : waiting ? COLORS.textMuted : COLORS.accent;
+  const statusColor = gpsError ? COLORS.danger : inRange ? COLORS.success : waiting ? COLORS.textMuted : COLORS.accentText;
   const label = gpsError ? "SIN UBICACIÓN" : waiting ? "BUSCANDO GPS…" : inRange ? "DENTRO DEL RANGO" : "FUERA DE RANGO";
   return (
     <div style={{ position: "relative", width: 220, height: 220, margin: "0 auto" }}>
@@ -172,8 +214,198 @@ function Radar({ distance, inRange, gpsError, hasFix }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Mapa (OpenStreetMap + Leaflet, cargado desde CDN — gratis, sin API key).
+// Muestra la ubicación real del promotor y, opcionalmente, las tiendas cercanas.
+// ---------------------------------------------------------------------------
+function MapView({ coords, stores = [] }) {
+  const elRef = useRef(null);
+  const mapRef = useRef(null);
+  const userRef = useRef(null);
+  const [ready, setReady] = useState(typeof window !== "undefined" && !!window.L);
+  const [failed, setFailed] = useState(false); // no se pudo cargar Leaflet (p.ej. red bloqueada)
+
+  // Carga Leaflet (CSS + JS) desde CDN una sola vez.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.L) { setReady(true); return; }
+    if (!document.getElementById("leaflet-css")) {
+      const link = document.createElement("link");
+      link.id = "leaflet-css";
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+    let s = document.getElementById("leaflet-js");
+    if (!s) {
+      s = document.createElement("script");
+      s.id = "leaflet-js";
+      s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      s.async = true;
+      document.body.appendChild(s);
+    }
+    s.addEventListener("load", () => setReady(true));
+    s.addEventListener("error", () => setFailed(true));
+    // Si en 8s no cargó Leaflet (red corporativa bloqueando el CDN), marca fallo.
+    const t = setTimeout(() => { if (!window.L) setFailed(true); }, 8000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Limpieza al desmontar.
+  useEffect(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } }, []);
+
+  // Inicializa / actualiza el mapa cuando hay coordenadas.
+  useEffect(() => {
+    const L = window.L;
+    if (!ready || !L || !coords || !elRef.current) return;
+    if (!mapRef.current) {
+      mapRef.current = L.map(elRef.current, { zoomControl: false, attributionControl: true }).setView([coords.lat, coords.lng], 15);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(mapRef.current);
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="color:${COLORS.accent};filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 28],
+      });
+      userRef.current = L.marker([coords.lat, coords.lng], { icon }).addTo(mapRef.current);
+    } else {
+      mapRef.current.setView([coords.lat, coords.lng]);
+      userRef.current.setLatLng([coords.lat, coords.lng]);
+    }
+    setTimeout(() => mapRef.current && mapRef.current.invalidateSize(), 150);
+  }, [ready, coords]);
+
+  // Marcadores de las tiendas cercanas.
+  useEffect(() => {
+    const L = window.L;
+    if (!ready || !L || !mapRef.current) return;
+    mapRef.current.__stores = mapRef.current.__stores || L.layerGroup().addTo(mapRef.current);
+    const layer = mapRef.current.__stores;
+    layer.clearLayers();
+    // Todas las tiendas del catálogo son Home Depot: marcador de círculo naranja
+    // (#F96302) con ícono de casa. El tooltip muestra "Nombre - Número".
+    const hdHtml = `<div style="width:26px;height:26px;border-radius:50%;background:#F96302;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.8V20h14V9.8"/></svg></div>`;
+    for (const s of stores) {
+      if (typeof s.lat !== "number" || typeof s.lng !== "number") continue;
+      const icon = L.divIcon({ className: "", html: hdHtml, iconSize: [26, 26], iconAnchor: [13, 13] });
+      const label = s.id ? `${s.name} - ${s.id}` : s.name;
+      L.marker([s.lat, s.lng], { icon }).bindTooltip(label, { direction: "top" }).addTo(layer);
+    }
+  }, [ready, stores]);
+
+  // Fallback si el mapa no cargó (p.ej. la red bloquea unpkg/OpenStreetMap):
+  // muestra las coordenadas en texto en lugar de un recuadro vacío.
+  if (failed) {
+    return (
+      <div style={{ marginBottom: 14, height: 160, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: COLORS.surface, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, padding: 14, textAlign: "center" }}>
+        <MapPin size={22} color={COLORS.accentText} />
+        <span style={{ fontSize: 13, color: COLORS.text, fontFamily: "JetBrains Mono" }}>
+          {coords ? `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : "Ubicación no disponible"}
+        </span>
+        <span style={{ fontSize: 11, color: COLORS.textMuted, lineHeight: 1.4 }}>
+          El mapa no cargó en esta red. Se verá al desplegar o con otra conexión.
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: "relative", marginBottom: 14 }}>
+      <div ref={elRef} style={{ height: 160, borderRadius: 14, overflow: "hidden", border: `1px solid ${COLORS.border}`, background: COLORS.surface2 }} />
+      {!coords && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.textMuted, fontSize: 12.5, pointerEvents: "none" }}>
+          Obteniendo tu ubicación…
+        </div>
+      )}
+    </div>
+  );
+}
+
+// META de ventas (placeholder; conectar a una pestaña "Metas" del Sheet).
+const SALES_GOALS = { rollos: 500, cubetas: 200 };
+
+function GoalBar({ label, actual, meta }) {
+  const pct = Math.min(100, Math.round((actual / meta) * 100) || 0);
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, color: COLORS.text, fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: 12, color: COLORS.textMuted }}>{actual} / {meta} · <b style={{ color: COLORS.accentText }}>{pct}%</b></span>
+      </div>
+      <div style={{ height: 12, borderRadius: 999, background: COLORS.surface2, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, borderRadius: 999, background: `linear-gradient(90deg, ${COLORS.accent}, #ffd84d)`, transition: "width .4s ease" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 6 }}>
+        {[25, 50, 75, 100].map((m) => (
+          <span key={m} style={{ fontSize: 8.5, fontWeight: 600, color: pct >= m ? COLORS.accentText : COLORS.textMuted }}>{m === 100 ? "Meta" : `${m}%`}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Barra de meta de ventas con gamificación (nivel + mensaje motivacional).
+// `actual` se suma de las visitas del día; la META es placeholder por ahora.
+function SalesGoals({ records }) {
+  const sums = Object.values(records || {}).reduce(
+    (a, r) => ({ rollos: a.rollos + (r.rollos || 0), cubetas: a.cubetas + (r.cubetas || 0) }),
+    { rollos: 0, cubetas: 0 }
+  );
+  const rPct = Math.min(100, (sums.rollos / SALES_GOALS.rollos) * 100 || 0);
+  const cPct = Math.min(100, (sums.cubetas / SALES_GOALS.cubetas) * 100 || 0);
+  const overall = Math.round((rPct + cPct) / 2);
+  const level = overall >= 75 ? "Nivel Oro" : overall >= 40 ? "Nivel Plata" : "Nivel Bronce";
+  const faltanR = Math.max(0, SALES_GOALS.rollos - sums.rollos);
+  const faltanC = Math.max(0, SALES_GOALS.cubetas - sums.cubetas);
+  const msg =
+    overall >= 100 ? "¡Meta cumplida! Excelente trabajo."
+    : overall >= 75 ? `¡Casi lo logras! Te faltan ${faltanR} rollos y ${faltanC} cubetas.`
+    : overall >= 40 ? `¡Vas muy bien! Te faltan ${faltanR} rollos y ${faltanC} cubetas para tu meta.`
+    : "¡Vamos con todo! Cada visita te acerca a tu meta.";
+  return (
+    <>
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>META DE VENTAS</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.accentSoft, color: COLORS.accentText, fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999 }}>
+            <Trophy size={12} /> {level}
+          </span>
+        </div>
+        <GoalBar label="Rollos" actual={sums.rollos} meta={SALES_GOALS.rollos} />
+        <GoalBar label="Cubetas" actual={sums.cubetas} meta={SALES_GOALS.cubetas} />
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.successSoft, border: `1px solid ${COLORS.success}55`, borderRadius: 12, padding: "10px 12px", marginBottom: 14 }}>
+        <Zap size={16} color={COLORS.success} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span style={{ fontSize: 12, color: COLORS.text, lineHeight: 1.45 }}>{msg}</span>
+      </div>
+    </>
+  );
+}
+
 export default function PromotoresApp() {
   useGoogleFonts();
+
+  // Tema claro/oscuro heredado del dispositivo (prefers-color-scheme). Al
+  // cambiar el esquema del sistema, se actualiza la paleta VIVA (in-place) y se
+  // fuerza un re-render para que toda la UI adopte el nuevo tema al instante.
+  const [scheme, setScheme] = useState(detectScheme());
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = (e) => {
+      const s = e.matches ? "light" : "dark";
+      applyScheme(s);
+      setScheme(s);
+    };
+    applyScheme(scheme); // asegura sincronía inicial
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else mq.addListener(onChange); // Safari antiguo
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else mq.removeListener(onChange);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { status, user, error: authError, login, logout } = useAuth();
 
@@ -184,6 +416,7 @@ export default function PromotoresApp() {
 
   // Tiendas cercanas (por GPS). No hay asignación fija por promotor.
   const [nearbyStores, setNearbyStores] = useState([]);
+  const [allStores, setAllStores] = useState([]); // catálogo completo (para el mapa)
   const [nearbyRadius, setNearbyRadius] = useState(2000); // m; lo confirma el server
   const [dashCoords, setDashCoords] = useState(null);
   const [storesLoading, setStoresLoading] = useState(false);
@@ -198,6 +431,14 @@ export default function PromotoresApp() {
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
   const [gpsError, setGpsError] = useState(null);
   const [showSheet, setShowSheet] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false); // modal de retroalimentación
+
+  // Formulario de Competencia (interfaz; la persistencia se conecta después).
+  const [compMarca, setCompMarca] = useState("");
+  const [compDesc, setCompDesc] = useState("");
+  const [compFotos, setCompFotos] = useState([]); // data URLs (previsualización)
+  const [compSent, setCompSent] = useState(false);
+  const compFileRef = useRef(null);
   const [rollos, setRollos] = useState(0);
   const [cubetas, setCubetas] = useState(0);
   const [photo, setPhoto] = useState(null); // foto de check-in (Base64), obligatoria
@@ -327,6 +568,17 @@ export default function PromotoresApp() {
     if (status === "authed" && screen === "dashboard") loadNearbyStores();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, screen]);
+
+  // Carga el catálogo COMPLETO de tiendas (para pintarlas todas en el mapa).
+  useEffect(() => {
+    if (status !== "authed") return;
+    const ctrl = new AbortController();
+    api
+      .allStores(ctrl.signal)
+      .then((data) => setAllStores(data?.stores ?? []))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [status]);
 
   // GPS REAL únicamente (sin modo simulación). Observa la ubicación del
   // dispositivo mientras se está en la pantalla de una tienda.
@@ -510,6 +762,25 @@ export default function PromotoresApp() {
     setPassword("");
   }
 
+  // Navegación entre las secciones del footer.
+  function goTab(key) {
+    setSelectedStore(null);
+    setScreen(key);
+  }
+
+  // Fotos del formulario de Competencia (previsualización en el cliente).
+  async function handleCompFotos(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    for (const file of files) {
+      try {
+        setCompFotos((prev) => [...prev, { name: file.name, url: URL.createObjectURL(file) }]);
+      } catch {
+        /* ignora archivos inválidos */
+      }
+    }
+  }
+
   const bgTexture = {
     backgroundColor: COLORS.bg,
     backgroundImage: `linear-gradient(${COLORS.border}22 1px, transparent 1px), linear-gradient(90deg, ${COLORS.border}22 1px, transparent 1px)`,
@@ -532,7 +803,7 @@ export default function PromotoresApp() {
         <div style={{ width: "100%", maxWidth: 360, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: "32px 28px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
             <div style={{ width: 34, height: 34, borderRadius: 9, background: COLORS.accentSoft, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Navigation size={17} color={COLORS.accent} />
+              <Navigation size={17} color={COLORS.accentText} />
             </div>
             <span style={{ fontFamily: "Inter", fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>PROMOTORES DE CAMPO</span>
           </div>
@@ -571,7 +842,7 @@ export default function PromotoresApp() {
           <button
             onClick={handleLogin}
             disabled={loggingIn || !promoterId.trim() || !password}
-            style={{ width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 10, border: "none", background: promoterId.trim() && password ? COLORS.accent : COLORS.surface2, color: promoterId.trim() && password ? "#1A0D05" : COLORS.textMuted, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: loggingIn || !promoterId.trim() || !password ? "not-allowed" : "pointer" }}
+            style={{ width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 10, border: "none", background: promoterId.trim() && password ? COLORS.accent : COLORS.surface2, color: promoterId.trim() && password ? COLORS.onAccent : COLORS.textMuted, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: loggingIn || !promoterId.trim() || !password ? "not-allowed" : "pointer" }}
           >
             {loggingIn ? "Ingresando…" : "Iniciar sesión"}
           </button>
@@ -588,9 +859,15 @@ export default function PromotoresApp() {
   if (screen === "dashboard") {
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onLogout={handleLogout} />
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
-        <div style={{ padding: "20px 20px 32px", maxWidth: 480, margin: "0 auto" }}>
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
+          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>TU UBICACIÓN</span>
+          <MapView coords={dashCoords} stores={allStores} />
+
+          <SalesGoals records={records} />
+
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>
               TIENDAS CERCANAS {dashCoords ? `(${(nearbyRadius / 1000).toFixed(nearbyRadius % 1000 ? 1 : 0)} km)` : ""}
@@ -634,8 +911,10 @@ export default function PromotoresApp() {
                     <MapPin size={18} color={COLORS.textMuted} />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ margin: 0, color: COLORS.text, fontSize: 14.5, fontWeight: 600 }}>{s.name}</p>
-                    <p style={{ margin: "2px 0 0", color: COLORS.textMuted, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.address}</p>
+                    <p style={{ margin: 0, color: COLORS.text, fontSize: 14.5, fontWeight: 600 }}>{s.name} - {s.id}</p>
+                    {s.address && s.address !== `Tienda #${s.id}` && (
+                      <p style={{ margin: "2px 0 0", color: COLORS.textMuted, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.address}</p>
+                    )}
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                     {typeof s.distance === "number" && (
@@ -648,6 +927,7 @@ export default function PromotoresApp() {
             })}
           </div>
         </div>
+        <FooterNav current="dashboard" onNavigate={goTab} />
       </div>
     );
   }
@@ -658,8 +938,9 @@ export default function PromotoresApp() {
     const isCheckedIn = record?.status === "checked-in";
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onLogout={handleLogout} />
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
         <div style={{ padding: "18px 20px 40px", maxWidth: 460, margin: "0 auto" }}>
           <button onClick={() => setScreen("dashboard")} style={{ background: "none", border: "none", color: COLORS.textMuted, display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14 }}>
             <ArrowLeft size={15} /> Tiendas
@@ -710,7 +991,7 @@ export default function PromotoresApp() {
                       disabled={photoBusy}
                       style={{ width: "100%", marginTop: 10, padding: "13px 0", borderRadius: 12, border: `1px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
                     >
-                      <Camera size={16} color={COLORS.accent} />
+                      <Camera size={16} color={COLORS.accentText} />
                       {photoBusy ? "Procesando…" : "Tomar foto"}
                     </button>
                   ) : (
@@ -734,7 +1015,7 @@ export default function PromotoresApp() {
                   style={{
                     width: "100%", marginTop: 16, padding: "14px 0", borderRadius: 12, border: "none",
                     background: gpsCoords && photo ? COLORS.accent : COLORS.surface2,
-                    color: gpsCoords && photo ? "#1A0D05" : COLORS.textMuted,
+                    color: gpsCoords && photo ? COLORS.onAccent : COLORS.textMuted,
                     fontFamily: "Inter", fontWeight: 600, fontSize: 15, cursor: gpsCoords && photo && !busy ? "pointer" : "not-allowed",
                   }}
                 >
@@ -756,7 +1037,7 @@ export default function PromotoresApp() {
                   style={{
                     width: "100%", marginTop: 20, padding: "14px 0", borderRadius: 12, border: "none",
                     background: gpsCoords ? COLORS.success : COLORS.surface2,
-                    color: gpsCoords ? "#052E24" : COLORS.textMuted,
+                    color: gpsCoords ? COLORS.onSuccess : COLORS.textMuted,
                     fontFamily: "Inter", fontWeight: 600, fontSize: 15, cursor: gpsCoords ? "pointer" : "not-allowed",
                   }}
                 >
@@ -828,7 +1109,7 @@ export default function PromotoresApp() {
                   style={{
                     flex: 2, padding: "12px 0", borderRadius: 10, border: "none",
                     background: gpsCoords ? COLORS.success : COLORS.surface2,
-                    color: gpsCoords ? "#052E24" : COLORS.textMuted,
+                    color: gpsCoords ? COLORS.onSuccess : COLORS.textMuted,
                     fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: gpsCoords && !busy ? "pointer" : "not-allowed",
                   }}
                 >
@@ -842,25 +1123,195 @@ export default function PromotoresApp() {
     );
   }
 
+  // --- Competencia (formulario de acciones/estrategias de la competencia) ---
+  if (screen === "competencia") {
+    const canSendComp = compMarca.trim() && compDesc.trim();
+    return (
+      <div style={{ ...bgTexture, minHeight: "100dvh" }}>
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
+          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>COMPETENCIA</span>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: COLORS.text, margin: "2px 0 4px" }}>Reportar acción</h2>
+          <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 18px", lineHeight: 1.5 }}>
+            Sube estrategias, material gráfico o acciones de la competencia.
+          </p>
+
+          {compSent ? (
+            <div style={{ textAlign: "center", padding: "24px 0" }}>
+              <div style={{ width: 48, height: 48, borderRadius: "50%", background: COLORS.successSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+                <Check size={24} color={COLORS.success} />
+              </div>
+              <p style={{ color: COLORS.text, fontWeight: 600, margin: "0 0 6px" }}>¡Reporte capturado!</p>
+              <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 18px", lineHeight: 1.5 }}>
+                El guardado en el servidor se conectará próximamente (misma integración de fotos que el check-in).
+              </p>
+              <button
+                onClick={() => { setCompSent(false); setCompMarca(""); setCompDesc(""); setCompFotos([]); }}
+                style={{ padding: "11px 20px", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+              >
+                Nuevo reporte
+              </button>
+            </div>
+          ) : (
+            <>
+              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Marca / competidor</label>
+              <div style={{ background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+                <input value={compMarca} onChange={(e) => setCompMarca(e.target.value)} placeholder="Ej. Impermeabilizante XYZ" style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 15, width: "100%" }} />
+              </div>
+
+              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Descripción</label>
+              <div style={{ background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+                <textarea value={compDesc} onChange={(e) => setCompDesc(e.target.value)} rows={4} maxLength={2000} placeholder="Qué observaste: precio, promoción, material…" style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 15, width: "100%", resize: "vertical", minHeight: 80, lineHeight: 1.5, display: "block" }} />
+              </div>
+
+              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Evidencia (fotos)</label>
+              <input ref={compFileRef} type="file" accept="image/*" multiple onChange={handleCompFotos} style={{ display: "none" }} />
+              <button
+                onClick={() => compFileRef.current && compFileRef.current.click()}
+                style={{ width: "100%", padding: "16px 0", borderRadius: 12, border: `1.5px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+              >
+                <ImagePlus size={16} color={COLORS.accentText} /> Subir fotos
+              </button>
+              {compFotos.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                  {compFotos.map((f, i) => (
+                    <div key={i} style={{ position: "relative", width: 72, height: 72, borderRadius: 10, overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
+                      <img src={f.url} alt={f.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <button
+                        onClick={() => setCompFotos((prev) => prev.filter((_, j) => j !== i))}
+                        style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <button
+                onClick={() => canSendComp && setCompSent(true)}
+                disabled={!canSendComp}
+                style={{ width: "100%", marginTop: 18, padding: "14px 0", borderRadius: 12, border: "none", background: canSendComp ? COLORS.accent : COLORS.surface2, color: canSendComp ? COLORS.onAccent : COLORS.textMuted, fontWeight: 700, fontSize: 15, cursor: canSendComp ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+              >
+                <Send size={16} /> Enviar reporte
+              </button>
+              <p style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 10, lineHeight: 1.5 }}>
+                Nota: la interfaz está lista; el guardado en el servidor (info + fotos) se conectará en la siguiente fase.
+              </p>
+            </>
+          )}
+        </div>
+        <FooterNav current="competencia" onNavigate={goTab} />
+      </div>
+    );
+  }
+
+  // --- Perfil ---------------------------------------------------------------
+  if (screen === "perfil") {
+    const initials = (user.name || user.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
+    return (
+      <div style={{ ...bgTexture, minHeight: "100dvh" }}>
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        <div style={{ padding: "28px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
+          <div style={{ width: 64, height: 64, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, margin: "0 auto 12px" }}>
+            {initials}
+          </div>
+          <h2 style={{ textAlign: "center", fontSize: 19, fontWeight: 700, color: COLORS.text, margin: "0 0 2px" }}>{user.name}</h2>
+          <p style={{ textAlign: "center", fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 22px" }}>Promotor de campo</p>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "6px 16px" }}>
+            <Row label="ID" value={user.id} />
+            <Row label="Ubicación" value={user.location || "—"} />
+            <Row label="Supervisor" value={user.supervisor || "—"} last />
+          </div>
+          <button
+            onClick={handleLogout}
+            style={{ width: "100%", marginTop: 18, padding: "13px 0", borderRadius: 12, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.text, fontWeight: 600, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+          >
+            <LogOut size={16} /> Cerrar sesión
+          </button>
+        </div>
+        <FooterNav current="perfil" onNavigate={goTab} />
+      </div>
+    );
+  }
+
   return null;
 }
 
-function TopBar({ user, onLogout }) {
+// Wordmark de marca. PROVISIONAL: cuando llegue el logo oficial de Protexa
+// (SVG/PNG positivo y negativo) se reemplaza SOLO aquí por un <img>.
+function Brand() {
+  // Logo oficial Protexa. El navegador elige la versión según el tema del
+  // dispositivo: blanca en modo oscuro, negra en modo claro.
+  return (
+    <picture style={{ display: "flex", alignItems: "center" }}>
+      <source srcSet="/protexa-logo-blanco.png" media="(prefers-color-scheme: dark)" />
+      <img src="/protexa-logo-negro.png" alt="Protexa · Desde 1945" style={{ height: 28, width: "auto", display: "block" }} />
+    </picture>
+  );
+}
+
+function TopBar({ user, onFeedback, onProfile }) {
   const initials = (user.name || user.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: `1px solid ${COLORS.border}` }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: `1px solid ${COLORS.border}` }}>
+      <Brand />
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 32, height: 32, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, fontFamily: "Inter" }}>
+        {onFeedback && (
+          <button
+            onClick={onFeedback}
+            title="Reportar un problema"
+            style={{ display: "flex", alignItems: "center", gap: 6, background: COLORS.accentSoft, border: `1px solid ${COLORS.accent}`, borderRadius: 9, padding: "7px 12px", color: COLORS.accentText, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+          >
+            <MessageSquare size={14} /> Reportar
+          </button>
+        )}
+        <button
+          onClick={onProfile}
+          title="Mi perfil"
+          style={{ width: 34, height: 34, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 700, border: "none", cursor: "pointer" }}
+        >
           {initials}
-        </div>
-        <div>
-          <p style={{ margin: 0, fontSize: 13.5, fontWeight: 600, color: COLORS.text }}>{user.name}</p>
-          <p style={{ margin: 0, fontSize: 11, color: COLORS.textMuted, fontFamily: "JetBrains Mono" }}>{user.id}{user.location ? ` · ${user.location}` : ""}</p>
-        </div>
+        </button>
       </div>
-      <button onClick={onLogout} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: `1px solid ${COLORS.border}`, borderRadius: 9, padding: "7px 12px", color: COLORS.textMuted, fontSize: 12.5, cursor: "pointer" }}>
-        <LogOut size={14} /> Cerrar sesion
-      </button>
+    </div>
+  );
+}
+
+// Barra de navegación inferior (footer). Capacitación y Soporte quedan
+// deshabilitadas por ahora (se implementan después).
+function FooterNav({ current, onNavigate }) {
+  // Capacitación y Soporte abren sus NotebookLM (Google) en una pestaña nueva.
+  const items = [
+    { key: "dashboard", label: "Inicio", Icon: Home },
+    { key: "competencia", label: "Competencia", Icon: BarChart3 },
+    { key: "capacitacion", label: "Capacitación", Icon: GraduationCap, href: "https://notebook.google.com/notebook/a632f11d-4361-410d-add1-410cfa806e34/preview" },
+    { key: "soporte", label: "Soporte", Icon: LifeBuoy, href: "https://notebook.google.com/notebook/8587af76-29d1-489b-8442-725daabceb69/preview" },
+    { key: "perfil", label: "Perfil", Icon: User },
+  ];
+  return (
+    <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, background: COLORS.surface, borderTop: `1px solid ${COLORS.border}`, zIndex: 40, paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <div style={{ maxWidth: 480, margin: "0 auto", display: "flex" }}>
+        {items.map(({ key, label, Icon, href }) => {
+          const active = current === key;
+          const color = active ? COLORS.accentText : COLORS.textMuted;
+          return (
+            <button
+              key={key}
+              onClick={() => (href ? window.open(href, "_blank", "noopener,noreferrer") : onNavigate(key))}
+              title={label}
+              style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 11px", background: "none", border: "none", color, cursor: "pointer" }}
+            >
+              <Icon size={20} />
+              <span style={{ fontSize: 9.5, fontWeight: 600 }}>{label}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -869,7 +1320,7 @@ function ConnectivityBanner({ online, pending, syncing, onSync }) {
   if (online && pending === 0) return null; // todo sincronizado y con red: sin banner
   const offline = !online;
   const bg = offline ? COLORS.dangerSoft : COLORS.accentSoft;
-  const color = offline ? COLORS.danger : COLORS.accent;
+  const color = offline ? COLORS.danger : COLORS.accentText;
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "8px 14px", background: bg, color, fontSize: 12.5, fontWeight: 600 }}>
       {offline ? <WifiOff size={14} /> : <RefreshCw size={14} />}
@@ -896,7 +1347,7 @@ function ConnectivityBanner({ online, pending, syncing, onSync }) {
 function StatusPill({ status }) {
   const map = {
     none: { label: "Sin visitar", color: COLORS.textMuted, bg: COLORS.surface2 },
-    in: { label: "En tienda", color: COLORS.accent, bg: COLORS.accentSoft },
+    in: { label: "En tienda", color: COLORS.accentText, bg: COLORS.accentSoft },
     done: { label: "Completada", color: COLORS.success, bg: COLORS.successSoft },
   };
   const s = map[status];
@@ -912,6 +1363,210 @@ function Row({ label, value, last }) {
     <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: last ? "none" : `1px solid ${COLORS.border}` }}>
       <span style={{ fontSize: 13, color: COLORS.textMuted }}>{label}</span>
       <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.text, fontFamily: "JetBrains Mono" }}>{value}</span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FeedbackModal — reporte de retroalimentación del asesor.
+// ---------------------------------------------------------------------------
+// Modal (bottom-sheet, como el reporte de salida) donde el asesor describe un
+// problema. ID y nombre vienen autollenados desde la sesión pero son editables;
+// la sucursal se escribe a mano (para poder reportar sucursales que no aparecen
+// en el catálogo) y la descripción es un campo amplio. Al enviar, se guarda una
+// fila en la pestaña de retroalimentación del Google Sheet.
+function FeedbackModal({ user, onClose }) {
+  const [idPromotor, setIdPromotor] = useState(user?.id ?? "");
+  const [nombre, setNombre] = useState(user?.name ?? "");
+  const [sucursal, setSucursal] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+  const [state, setState] = useState("idle"); // idle | sending | sent | error
+  const [errorMsg, setErrorMsg] = useState("");
+  const [loc, setLoc] = useState({ status: "loading", coords: null }); // ubicación en tiempo real
+
+  // Captura la ubicación GPS real al abrir el modal.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLoc({ status: "error", coords: null });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setLoc({ status: "ok", coords: { lat: pos.coords.latitude, lng: pos.coords.longitude } }),
+      () => setLoc({ status: "error", coords: null }),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+    );
+  }, []);
+
+  const canSend = sucursal.trim().length > 0 && descripcion.trim().length > 0 && state !== "sending";
+
+  async function handleSubmit() {
+    if (!canSend) return;
+    setState("sending");
+    setErrorMsg("");
+    try {
+      await api.sendFeedback({
+        idPromotor: idPromotor.trim(),
+        nombre: nombre.trim(),
+        sucursal: sucursal.trim(),
+        descripcion: descripcion.trim(),
+        ubicacion: loc.coords ? `${loc.coords.lat.toFixed(6)},${loc.coords.lng.toFixed(6)}` : "",
+      });
+      setState("sent");
+    } catch (e) {
+      setState("error");
+      setErrorMsg(
+        e instanceof ApiError
+          ? e.message
+          : "No hay conexión. Revisa tu internet e inténtalo de nuevo."
+      );
+    }
+  }
+
+  const labelStyle = { fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 };
+  const fieldWrap = { background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 14 };
+  const inputStyle = { background: "transparent", border: "none", outline: "none", color: COLORS.text, fontFamily: "Inter", fontSize: 15, width: "100%" };
+
+  return (
+    <div
+      onClick={() => state !== "sending" && onClose()}
+      style={{ position: "fixed", inset: 0, background: "rgba(5,8,12,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 60 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: "100%", maxWidth: 460, maxHeight: "92dvh", overflowY: "auto", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: "22px 22px 26px" }}
+      >
+        <div style={{ width: 36, height: 4, borderRadius: 2, background: COLORS.border, margin: "0 auto 18px" }} />
+
+        {state === "sent" ? (
+          <div style={{ textAlign: "center", padding: "10px 0 6px" }}>
+            <div style={{ width: 48, height: 48, borderRadius: "50%", background: COLORS.successSoft, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+              <Check size={24} color={COLORS.success} />
+            </div>
+            <h3 style={{ fontFamily: "Space Grotesk", fontSize: 18, fontWeight: 600, color: COLORS.text, margin: "0 0 6px" }}>¡Gracias por tu reporte!</h3>
+            <p style={{ fontSize: 13, color: COLORS.textMuted, margin: "0 0 20px", lineHeight: 1.5 }}>
+              Tu retroalimentación se registró. El equipo de Inteligencia Comercial la revisará.
+            </p>
+            <button
+              onClick={onClose}
+              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: "pointer" }}
+            >
+              Cerrar
+            </button>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>
+              <div>
+                <h3 style={{ fontFamily: "Space Grotesk", fontSize: 17, fontWeight: 600, color: COLORS.text, margin: "0 0 4px" }}>Reportar un problema</h3>
+                <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 18px", lineHeight: 1.5 }}>
+                  Cuéntanos qué pasó con el mayor detalle posible para poder ayudarte.
+                </p>
+              </div>
+              <button
+                onClick={() => state !== "sending" && onClose()}
+                aria-label="Cerrar"
+                style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>ID del promotor</label>
+                <div style={fieldWrap}>
+                  <input
+                    value={idPromotor}
+                    onChange={(e) => setIdPromotor(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="987654"
+                    style={{ ...inputStyle, fontFamily: "JetBrains Mono", fontSize: 15 }}
+                  />
+                </div>
+              </div>
+              <div style={{ flex: 1.4 }}>
+                <label style={labelStyle}>Nombre</label>
+                <div style={fieldWrap}>
+                  <input
+                    value={nombre}
+                    onChange={(e) => setNombre(e.target.value)}
+                    placeholder="Nombre del asesor"
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <label style={labelStyle}>Sucursal</label>
+            <div style={fieldWrap}>
+              <input
+                value={sucursal}
+                onChange={(e) => setSucursal(e.target.value)}
+                placeholder="Ej. Morelia, Michoacán"
+                style={inputStyle}
+              />
+            </div>
+
+            <label style={labelStyle}>Ubicación (en tiempo real)</label>
+            <div style={{ ...fieldWrap, display: "flex", alignItems: "center", gap: 9 }}>
+              <MapPin size={16} color={loc.status === "ok" ? COLORS.accentText : COLORS.textMuted} style={{ flexShrink: 0 }} />
+              <span style={{ color: loc.status === "ok" ? COLORS.text : COLORS.textMuted, fontSize: 13.5, fontFamily: "JetBrains Mono" }}>
+                {loc.status === "ok"
+                  ? `${loc.coords.lat.toFixed(4)}, ${loc.coords.lng.toFixed(4)}`
+                  : loc.status === "loading"
+                  ? "Obteniendo ubicación…"
+                  : "Ubicación no disponible"}
+              </span>
+              {loc.status === "ok" && (
+                <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4, color: COLORS.success, fontSize: 11, fontWeight: 700 }}>
+                  <Check size={13} /> Capturada
+                </span>
+              )}
+            </div>
+
+            <label style={labelStyle}>Describe el problema</label>
+            <div style={{ ...fieldWrap, padding: "10px 12px" }}>
+              <textarea
+                value={descripcion}
+                onChange={(e) => setDescripcion(e.target.value)}
+                rows={5}
+                maxLength={4000}
+                placeholder="Ej. Estoy en la sucursal de Morelia en Michoacán y no he logrado hacer el check in porque no me aparece mi sucursal. ¿Qué puedo hacer?"
+                style={{ ...inputStyle, resize: "vertical", minHeight: 96, lineHeight: 1.5, display: "block" }}
+              />
+            </div>
+
+            {state === "error" && (
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.dangerSoft, color: COLORS.danger, borderRadius: 10, padding: "10px 12px", fontSize: 12.5, lineHeight: 1.4, marginBottom: 14 }}>
+                <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+              <button
+                onClick={() => state !== "sending" && onClose()}
+                style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.textMuted, fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSubmit}
+                disabled={!canSend}
+                style={{
+                  flex: 2, padding: "12px 0", borderRadius: 10, border: "none",
+                  background: canSend ? COLORS.accent : COLORS.surface2,
+                  color: canSend ? COLORS.onAccent : COLORS.textMuted,
+                  fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: canSend ? "pointer" : "not-allowed",
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                }}
+              >
+                {state === "sending" ? "Enviando…" : (<><Send size={15} /> Enviar reporte</>)}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
