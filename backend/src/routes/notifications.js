@@ -10,12 +10,17 @@ import { Router } from "express";
 import { requireAuth, requireRole } from "../auth.js";
 import { listNotificationsFor } from "../notificationsSheet.js";
 import { getManagerSummary } from "../db.js";
+import { maybeSendWeeklyReports } from "../weeklyReport.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("admin", "gerente", "supervisor"));
 
 router.get("/", async (req, res) => {
   try {
+    // Best-effort y en segundo plano: si ya pasó una semana, genera y entrega
+    // el reporte semanal (admin + supervisores). No retrasa esta respuesta.
+    maybeSendWeeklyReports().catch(() => {});
+
     const role = req.promoter.role;
     const para = role === "supervisor" ? req.promoter.id : "admin";
     const notifications = await listNotificationsFor(para);

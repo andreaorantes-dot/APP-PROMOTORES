@@ -116,3 +116,16 @@ export async function findUserInSheet(userId) {
     return null;
   }
 }
+
+// Todos los usuarios con rol "supervisor" — lo usa el reporte semanal para
+// generarle uno a cada supervisor (uno por uno, con SU equipo).
+export async function getAllSupervisorsFromSheet() {
+  if (!isConfigured()) return [];
+  try {
+    const { byId } = await ensureCache();
+    return [...byId.values()].filter((u) => u.role === "supervisor");
+  } catch (e) {
+    console.warn("[usersSheet] No se pudo leer supervisores:", e.message);
+    return [];
+  }
+}

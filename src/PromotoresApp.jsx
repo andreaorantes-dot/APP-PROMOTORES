@@ -4,6 +4,7 @@ import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
+import { fmtDateTime } from "./dashboardShared.jsx";
 import {
   enqueueAction,
   listQueuedActions,
@@ -374,6 +375,7 @@ export default function PromotoresApp() {
   const [screen, setScreen] = useState("dashboard");
   const [records, setRecords] = useState({});
   const [myGoal, setMyGoal] = useState(null); // { target, achieved, reached } | null
+  const [myHistory, setMyHistory] = useState(null); // perfil completo (historial, tiendas frecuentes) | null
   const [selectedStore, setSelectedStore] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -421,6 +423,12 @@ export default function PromotoresApp() {
   const stores = nearbyStores;
   const store = selectedStore;
   const record = store ? records[store.id] : null;
+
+  // Recordatorio: sigue "en tienda" (check-in sin check-out) y ya es tarde.
+  // Solo un aviso visual al abrir el dashboard — no hay push real todavía.
+  const openVisit = Object.values(records).find((r) => r?.status === "checked-in");
+  const openVisitStore = openVisit ? allStores.find((s) => s.id === openVisit.storeId) : null;
+  const showCheckoutReminder = Boolean(openVisit) && new Date().getHours() >= 19;
 
   // Reenvía al backend las acciones que se encolaron (cifradas) sin red.
   const flushQueue = useCallback(async () => {
@@ -509,6 +517,18 @@ export default function PromotoresApp() {
       .catch(() => {}); // sin meta asignada o sin red: se queda en null
     return () => { active = false; };
   }, [status, records]);
+
+  // Historial propio (check-in/check-out, tiendas frecuentes) — solo se pide
+  // al entrar a "Perfil", no en cada carga del dashboard.
+  useEffect(() => {
+    if (status !== "authed" || screen !== "perfil" || !user) return;
+    let active = true;
+    api
+      .promoterProfile(user.id)
+      .then((p) => { if (active) setMyHistory(p); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [status, screen, user]);
 
   // Obtiene la ubicación GPS real y pide al backend las tiendas cercanas
   // (Haversine, radio ~2 km). No hay asignación fija por promotor.
@@ -735,6 +755,7 @@ export default function PromotoresApp() {
     await logout();
     setRecords({});
     setMyGoal(null);
+    setMyHistory(null);
     setSelectedStore(null);
     setNearbyStores([]);
     setDashCoords(null);
@@ -867,6 +888,18 @@ export default function PromotoresApp() {
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
         {onboarding.open && <OnboardingTour steps={ONBOARDING_STEPS_PROMOTOR} onClose={onboarding.dismiss} />}
         <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
+          {showCheckoutReminder && (
+            <button
+              onClick={() => openVisitStore && openStore(openVisitStore)}
+              style={{ width: "100%", textAlign: "left", display: "flex", gap: 10, alignItems: "flex-start", background: COLORS.accentSoft, border: `1px solid ${COLORS.accent}`, borderRadius: 12, padding: "12px 14px", marginBottom: 14, cursor: openVisitStore ? "pointer" : "default" }}
+            >
+              <Clock size={17} color={COLORS.accentText} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span style={{ fontSize: 12.5, color: COLORS.text, lineHeight: 1.45 }}>
+                Sigues marcado como "en tienda"{openVisitStore ? ` en ${openVisitStore.name}` : ""}. Si ya terminaste,
+                no olvides registrar tu salida.
+              </span>
+            </button>
+          )}
           <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>TU UBICACIÓN</span>
           <MapView coords={dashCoords} stores={allStores} />
 
@@ -1237,6 +1270,45 @@ export default function PromotoresApp() {
             <Row label="Ubicación" value={user.location || "—"} />
             <Row label="Supervisor" value={user.supervisor || "—"} last />
           </div>
+
+          {myHistory?.frequentStores?.length > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>TIENDAS FRECUENTES</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                {myHistory.frequentStores.map((s) => (
+                  <span key={s.storeId} style={{ fontSize: 12, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 999, padding: "5px 10px", color: COLORS.text }}>
+                    {s.storeName} <b>·{s.visits}</b>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginTop: 18 }}>
+            <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>MI HISTORIAL</span>
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+              {!myHistory ? (
+                <p style={{ color: COLORS.textMuted, fontSize: 13 }}>Cargando…</p>
+              ) : myHistory.history.length === 0 ? (
+                <p style={{ color: COLORS.textMuted, fontSize: 13 }}>Aún no tienes visitas registradas.</p>
+              ) : (
+                myHistory.history.map((v, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.storeName}</div>
+                      <div style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 2 }}>
+                        Entró {fmtDateTime(v.checkInTime) || "--"} · Salió {fmtDateTime(v.checkOutTime) || "--"}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0, color: COLORS.accentText, fontFamily: "JetBrains Mono", fontWeight: 800, fontSize: 13 }}>
+                      {v.rollos}R · {v.cubetas}C
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
           <button
             onClick={handleLogout}
             style={{ width: "100%", marginTop: 18, padding: "13px 0", borderRadius: 12, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.text, fontWeight: 600, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}

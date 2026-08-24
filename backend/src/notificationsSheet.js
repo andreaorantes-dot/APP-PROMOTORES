@@ -138,3 +138,17 @@ export async function listNotificationsFor(para, limit = 50) {
     .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
     .slice(0, limit);
 }
+
+// La notificación más reciente de un tipo/destinatario dado, o null. La usa
+// el reporte semanal para saber si ya pasó una semana desde el último envío.
+export async function getLatestNotification({ tipo, para }) {
+  try {
+    const rows = await readAllRows();
+    return rows
+      .filter((r) => r.tipo === tipo && r.para === para)
+      .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))[0] ?? null;
+  } catch (e) {
+    console.error("[notificationsSheet] No se pudo leer la última notificación:", e.message);
+    return null;
+  }
+}

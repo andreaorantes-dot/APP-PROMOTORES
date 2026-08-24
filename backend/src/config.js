@@ -82,4 +82,20 @@ export const config = {
     // pestaña es solo un resumen para que el admin lo revise sin abrir la app.
     competenciaTab: process.env.GOOGLE_SHEETS_COMPETENCIA_TAB ?? "Competencia",
   },
+
+  // --- Correo (reporte semanal para el admin) -------------------------------
+  // SMTP genérico (funciona con Google Workspace: host smtp.gmail.com, puerto
+  // 587, usuario = la cuenta, contraseña = una "contraseña de aplicación", NO
+  // la contraseña normal de la cuenta si tiene 2FA). Si falta cualquiera de
+  // estos, el envío de correo se omite (best-effort): el reporte in-app sigue
+  // funcionando igual.
+  smtp: {
+    host: process.env.SMTP_HOST ?? "",
+    port: Number(process.env.SMTP_PORT ?? 587),
+    user: process.env.SMTP_USER ?? "",
+    pass: process.env.SMTP_PASS ?? "",
+    from: process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "",
+  },
+  // A quién se le manda el reporte semanal por correo (además de verlo in-app).
+  adminReportEmail: process.env.ADMIN_REPORT_EMAIL ?? "",
 };
