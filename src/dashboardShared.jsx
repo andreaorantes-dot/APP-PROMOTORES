@@ -1,0 +1,432 @@
+// ---------------------------------------------------------------------------
+// Piezas compartidas entre ManagerDashboard (gerente/admin) y
+// SupervisorDashboard (supervisor): formato, mapa nacional, gráficas, KPIs,
+// fila de promotor, exportación CSV/Excel. Evita duplicar el mapa de Leaflet
+// y las gráficas SVG entre ambos tableros.
+import { useState, useEffect, useRef } from "react";
+import { MapPin, Maximize2, Minimize2, ChevronUp, ChevronDown, Target } from "lucide-react";
+import { COLORS } from "./theme.js";
+
+// --- Formato ----------------------------------------------------------------
+const moneyFmt = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 });
+const numFmt = new Intl.NumberFormat("es-MX");
+export const fmtMoney = (n) => moneyFmt.format(Number(n) || 0);
+export const fmtNum = (n) => numFmt.format(Number(n) || 0);
+export function fmtTime(iso) {
+  if (!iso) return "--:--";
+  try { return new Date(iso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }); } catch { return "--:--"; }
+}
+// Fecha + hora completas (para el CSV/Excel exportado: un solo día no la
+// necesita, pero en un rango de semana/mes/año es la única forma de saber
+// A QUÉ día pertenece cada visita).
+export function fmtDateTime(iso) {
+  if (!iso) return "";
+  try { return new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" }); } catch { return ""; }
+}
+// Fecha de hoy en la zona del navegador, para nombrar los archivos exportados.
+export function todayStamp() {
+  return new Date().toLocaleDateString("en-CA");
+}
+
+// Rango de fechas del tablero (dropdown en la vista maximizada).
+export const RANGE_OPTIONS = [
+  { key: "today", label: "Hoy" },
+  { key: "week", label: "Esta semana" },
+  { key: "month", label: "Este mes" },
+  { key: "year", label: "Este año" },
+];
+export const RANGE_LABELS = Object.fromEntries(RANGE_OPTIONS.map((r) => [r.key, r.label]));
+
+// Color del marcador/estado según ventas: verde si vendió, ámbar si está activo
+// pero aún sin ventas.
+export function salesColor(p) {
+  return p.rollos + p.cubetas > 0 ? COLORS.success : COLORS.accent;
+}
+
+// Fondo de textura de marca (igual que en la app del promotor).
+export function bgTexture() {
+  return {
+    backgroundColor: COLORS.bg,
+    backgroundImage: `linear-gradient(${COLORS.border}22 1px, transparent 1px), linear-gradient(90deg, ${COLORS.border}22 1px, transparent 1px)`,
+    backgroundSize: "28px 28px",
+  };
+}
+
+// Logo oficial Protexa (blanco en oscuro, negro en claro).
+export function Brand() {
+  return (
+    <picture style={{ display: "flex", alignItems: "center" }}>
+      <source srcSet="/protexa-logo-blanco.png" media="(prefers-color-scheme: dark)" />
+      <img src="/protexa-logo-negro.png" alt="Protexa · Desde 1945" style={{ height: 26, width: "auto", display: "block" }} />
+    </picture>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mapa nacional (Leaflet + OpenStreetMap por CDN, igual que la app).
+// ---------------------------------------------------------------------------
+export function NationalMap({ promoters, onSelect }) {
+  const elRef = useRef(null);
+  const mapRef = useRef(null);
+  const layerRef = useRef(null);
+  const [ready, setReady] = useState(typeof window !== "undefined" && !!window.L);
+  const [failed, setFailed] = useState(false);
+
+  // Carga Leaflet una sola vez.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.L) { setReady(true); return; }
+    if (!document.getElementById("leaflet-css")) {
+      const link = document.createElement("link");
+      link.id = "leaflet-css";
+      link.rel = "stylesheet";
+      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(link);
+    }
+    let s = document.getElementById("leaflet-js");
+    if (!s) {
+      s = document.createElement("script");
+      s.id = "leaflet-js";
+      s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      s.async = true;
+      document.body.appendChild(s);
+    }
+    s.addEventListener("load", () => setReady(true));
+    s.addEventListener("error", () => setFailed(true));
+    const t = setTimeout(() => { if (!window.L) setFailed(true); }, 8000);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } }, []);
+
+  // Inicializa el mapa centrado en México.
+  useEffect(() => {
+    const L = window.L;
+    if (!ready || !L || !elRef.current) return;
+    if (!mapRef.current) {
+      mapRef.current = L.map(elRef.current, { zoomControl: true, attributionControl: true }).setView([23.6, -102.5], 5);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(mapRef.current);
+      layerRef.current = L.layerGroup().addTo(mapRef.current);
+    }
+    setTimeout(() => mapRef.current && mapRef.current.invalidateSize(), 150);
+  }, [ready]);
+
+  // Marcadores de promotores (se redibujan al cambiar el filtro).
+  useEffect(() => {
+    const L = window.L;
+    if (!ready || !L || !mapRef.current || !layerRef.current) return;
+    const layer = layerRef.current;
+    layer.clearLayers();
+    const pts = [];
+    for (const p of promoters) {
+      if (typeof p.lat !== "number" || typeof p.lng !== "number") continue;
+      const color = salesColor(p);
+      const html = `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:800;font-family:Inter,system-ui">${p.storesVisited || ""}</div>`;
+      const icon = L.divIcon({ className: "", html, iconSize: [22, 22], iconAnchor: [11, 11] });
+      const popup = `<div style="font-family:Inter,system-ui;min-width:150px">
+        <div style="font-weight:700;margin-bottom:2px">${p.name}</div>
+        <div style="color:#666;font-size:12px;margin-bottom:6px">${p.estado || "Sin estado"} · ${p.status === "in" ? "En tienda" : "Cerró visitas"}</div>
+        <div style="font-size:12px">Rollos: <b>${fmtNum(p.rollos)}</b> · Cubetas: <b>${fmtNum(p.cubetas)}</b></div>
+        <div style="font-size:12px;margin-top:2px">Vendido: <b>${fmtMoney(p.money)}</b></div>
+      </div>`;
+      const marker = L.marker([p.lat, p.lng], { icon }).bindPopup(popup).addTo(layer);
+      if (onSelect) marker.on("click", () => onSelect(p));
+      pts.push([p.lat, p.lng]);
+    }
+    if (pts.length === 1) {
+      mapRef.current.setView(pts[0], 9);
+    } else if (pts.length > 1) {
+      try { mapRef.current.fitBounds(pts, { padding: [40, 40], maxZoom: 11 }); } catch { /* noop */ }
+    }
+  }, [ready, promoters, onSelect]);
+
+  if (failed) {
+    return (
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 20, textAlign: "center", background: COLORS.surface }}>
+        <MapPin size={24} color={COLORS.accentText} />
+        <span style={{ fontSize: 13, color: COLORS.textMuted, lineHeight: 1.5 }}>
+          El mapa no cargó en esta red (se bloqueó OpenStreetMap). Se verá al desplegar o con otra conexión. El listado y las gráficas sí funcionan.
+        </span>
+      </div>
+    );
+  }
+  return <div ref={elRef} style={{ height: "100%", width: "100%", background: COLORS.surface2 }} />;
+}
+
+// ---------------------------------------------------------------------------
+// Gráfica de barras horizontales (SVG en línea, sin dependencias).
+// ---------------------------------------------------------------------------
+export function BarChart({ data, color, format }) {
+  const max = Math.max(1, ...data.map((d) => d.value));
+  if (!data.length) {
+    return <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "8px 0" }}>Sin datos para mostrar.</p>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+      {data.map((d, i) => (
+        <div key={i}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3, gap: 8 }}>
+            <span style={{ fontSize: 12, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.label}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: COLORS.text, fontFamily: "JetBrains Mono", flexShrink: 0 }}>{format(d.value)}</span>
+          </div>
+          <div style={{ height: 10, borderRadius: 999, background: COLORS.surface2, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${Math.round((d.value / max) * 100)}%`, minWidth: d.value > 0 ? 4 : 0, borderRadius: 999, background: color || COLORS.accent, transition: "width .4s ease" }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Cuadrito de rollos / cubetas.
+export function CountBox({ label, value }) {
+  return (
+    <div style={{ flex: 1, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "6px 8px", textAlign: "center", minWidth: 0 }}>
+      <div style={{ fontSize: 16, fontWeight: 800, color: COLORS.text, fontFamily: "JetBrains Mono", lineHeight: 1.1 }}>{fmtNum(value)}</div>
+      <div style={{ fontSize: 9.5, letterSpacing: "0.06em", color: COLORS.textMuted, fontWeight: 600, textTransform: "uppercase" }}>{label}</div>
+    </div>
+  );
+}
+
+// KPI de la tira superior.
+export function Kpi({ icon: Icon, label, value, accent }) {
+  return (
+    <div style={{ flex: "1 0 auto", minWidth: 128, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "10px 12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <Icon size={13} color={accent ? COLORS.accentText : COLORS.textMuted} />
+        <span style={{ fontSize: 10, letterSpacing: "0.06em", color: COLORS.textMuted, fontWeight: 600, textTransform: "uppercase" }}>{label}</span>
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: accent ? COLORS.accentText : COLORS.text, fontFamily: "JetBrains Mono", lineHeight: 1.1 }}>{value}</div>
+    </div>
+  );
+}
+
+export function ChartCard({ title, children }) {
+  return (
+    <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+      <div style={{ fontSize: 11, letterSpacing: "0.08em", color: COLORS.textMuted, fontWeight: 700, textTransform: "uppercase", marginBottom: 12 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+// Barra de progreso de meta mensual (rollos+cubetas). `goal` = { target, achieved, reached } | null.
+export function GoalBar({ goal }) {
+  if (!goal) return null;
+  const pct = Math.min(100, Math.round((goal.achieved / goal.target) * 100));
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: goal.reached ? COLORS.success : COLORS.textMuted, fontWeight: 700, marginBottom: 3 }}>
+        <span>META DEL MES {goal.reached ? "· ¡ALCANZADA!" : ""}</span>
+        <span>{fmtNum(goal.achieved)}/{fmtNum(goal.target)}</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 999, background: COLORS.surface2, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, minWidth: pct > 0 ? 4 : 0, borderRadius: 999, background: goal.reached ? COLORS.success : COLORS.accent, transition: "width .4s ease" }} />
+      </div>
+    </div>
+  );
+}
+
+// Fila de un promotor en el listado. `onClick` (opcional) abre su perfil.
+// `onEditGoal` (opcional, SOLO lo pasa el tablero de admin/gerente) muestra un
+// botón para fijar/cambiar su meta mensual — el supervisor solo la ve.
+export function PromoterRow({ p, onClick, onEditGoal }) {
+  const color = salesColor(p);
+  const initials = (p.name || p.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
+  return (
+    <div
+      onClick={onClick ? () => onClick(p) : undefined}
+      style={{ display: "flex", alignItems: "center", gap: 11, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "10px 12px", cursor: onClick ? "pointer" : "default" }}
+    >
+      <div style={{ position: "relative", flexShrink: 0 }}>
+        <div style={{ width: 38, height: 38, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>
+          {initials}
+        </div>
+        <span style={{ position: "absolute", right: -1, bottom: -1, width: 12, height: 12, borderRadius: "50%", background: color, border: `2px solid ${COLORS.surface}` }} title={p.rollos + p.cubetas > 0 ? "Con ventas" : "Sin ventas"} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+          {onEditGoal && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onEditGoal(p); }}
+              title="Fijar meta mensual"
+              style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 3, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 999, padding: "2px 7px", color: COLORS.textMuted, fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+            >
+              <Target size={10} /> Meta
+            </button>
+          )}
+        </div>
+        <div style={{ fontSize: 11.5, color: COLORS.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {p.estado || "Sin estado"} · {p.status === "in" ? "En tienda" : "Cerró"} · entró {fmtTime(p.checkInTime)} · salió {fmtTime(p.checkOutTime)}
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 800, color: COLORS.accentText, fontFamily: "JetBrains Mono", marginTop: 2 }}>{fmtMoney(p.money)}</div>
+        <GoalBar goal={p.goal} />
+      </div>
+      <div style={{ display: "flex", gap: 6, width: 118, flexShrink: 0 }}>
+        <CountBox label="Rollos" value={p.rollos} />
+        <CountBox label="Cubetas" value={p.cubetas} />
+      </div>
+    </div>
+  );
+}
+
+// Modal para fijar la meta MENSUAL (unidades) de un promotor. Solo lo abre el
+// tablero de admin/gerente (ver el botón "Meta" en PromoterRow). `onSave(meta)`
+// recibe el número ya validado; el llamador hace la petición y refresca.
+export function EditGoalModal({ promoter, onSave, onClose, saving }) {
+  const [value, setValue] = useState(String(promoter.goal?.target ?? ""));
+  const [err, setErr] = useState("");
+
+  function submit() {
+    const meta = Number(value);
+    if (!Number.isFinite(meta) || meta <= 0) {
+      setErr("Ingresa un número mayor a 0.");
+      return;
+    }
+    setErr("");
+    onSave(meta);
+  }
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 16, width: "min(360px, 100%)", padding: 20, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <Target size={16} color={COLORS.accentText} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>Meta mensual</span>
+        </div>
+        <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "4px 0 14px" }}>{promoter.name} · unidades (rollos + cubetas) en el mes.</p>
+        <input
+          type="number"
+          min="1"
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="Ej. 40"
+          style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontSize: 15, fontFamily: "JetBrains Mono" }}
+        />
+        {err && <p style={{ color: COLORS.danger, fontSize: 12, margin: "8px 0 0" }}>{err}</p>}
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.text, fontWeight: 600, fontSize: 13.5, cursor: "pointer" }}>
+            Cancelar
+          </button>
+          <button
+            onClick={submit}
+            disabled={saving}
+            style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontWeight: 700, fontSize: 13.5, cursor: saving ? "default" : "pointer", opacity: saving ? 0.7 : 1 }}
+          >
+            {saving ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Exportación CSV / Excel -------------------------------------------------
+export const EXPORT_HEADERS = ["ID", "Promotor", "Estado", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Dinero"];
+
+export function buildExportRows(promoters) {
+  return promoters.flatMap((p) =>
+    (p.visits ?? []).map((v) => ({
+      id: p.id,
+      promotor: p.name,
+      estado: v.estado || "Sin estado",
+      tienda: v.storeName,
+      dia: v.day || "",
+      entrada: fmtDateTime(v.checkInTime),
+      salida: fmtDateTime(v.checkOutTime),
+      rollos: v.rollos,
+      cubetas: v.cubetas,
+      dinero: v.money,
+    }))
+  );
+}
+
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function downloadCsv(rows, filename) {
+  if (!rows.length) return;
+  const escape = (v) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [EXPORT_HEADERS.join(",")];
+  for (const r of rows) {
+    lines.push([r.id, r.promotor, r.estado, r.tienda, r.dia, r.entrada, r.salida, r.rollos, r.cubetas, r.dinero].map(escape).join(","));
+  }
+  // BOM al inicio: para que Excel detecte UTF-8 y no rompa los acentos/ñ.
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  triggerBlobDownload(blob, filename);
+}
+
+// Carga la librería de Excel solo cuando se pide (nunca la descarga un
+// promotor de campo: ninguno de estos componentes se monta para ellos).
+export async function downloadXlsx(rows, filename) {
+  if (!rows.length) return;
+  const XLSX = await import("xlsx");
+  const data = rows.map((r) => ({
+    ID: r.id, Promotor: r.promotor, Estado: r.estado, Tienda: r.tienda, Día: r.dia,
+    Entrada: r.entrada, Salida: r.salida, Rollos: r.rollos, Cubetas: r.cubetas, Dinero: r.dinero,
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Promotores");
+  XLSX.writeFile(wb, filename);
+}
+
+// Cabecera del panel (lista de promotores / colapsar / maximizar).
+export function PanelHeader({ isDesktop, panelMode, count, total, onToggleCollapse, onToggleMax, title = "Promotores activos", icon: Icon }) {
+  const isCollapsed = panelMode === "collapsed";
+  const isMax = panelMode === "max";
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: isCollapsed ? "none" : `1px solid ${COLORS.border}`, flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        {Icon && <Icon size={16} color={COLORS.accentText} />}
+        <span style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.text, whiteSpace: "nowrap" }}>{title}</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: COLORS.accentText, background: COLORS.accentSoft, borderRadius: 999, padding: "2px 8px" }}>
+          {count}{count !== total ? `/${total}` : ""}
+        </span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <MaximizeButton isMax={isMax} onClick={onToggleMax} />
+        <CollapseButton isDesktop={isDesktop} isCollapsed={isCollapsed} onClick={onToggleCollapse} />
+      </div>
+    </div>
+  );
+}
+
+function MaximizeButton({ isMax, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title={isMax ? "Restaurar" : "Maximizar (ver gráficas)"}
+      style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: isMax ? COLORS.accentSoft : COLORS.surface2, color: isMax ? COLORS.accentText : COLORS.text, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+    >
+      {isMax ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+    </button>
+  );
+}
+function CollapseButton({ isDesktop, isCollapsed, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      title={isCollapsed ? "Mostrar listado" : "Colapsar"}
+      style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+    >
+      {isDesktop
+        ? (isCollapsed ? <ChevronDown size={15} style={{ transform: "rotate(90deg)" }} /> : <ChevronUp size={15} style={{ transform: "rotate(90deg)" }} />)
+        : (isCollapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />)}
+    </button>
+  );
+}

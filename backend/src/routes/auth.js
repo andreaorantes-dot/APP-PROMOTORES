@@ -18,14 +18,30 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// GET /api/auth/session -> { id, name, location, supervisor }
+// GET /api/auth/session -> { id, name, role, location?, supervisor?, checkInRadiusMeters }
 // Las tiendas ya NO vienen aquí: se obtienen por cercanía en GET /api/stores.
+// El `role` (del JWT) le dice al frontend qué pantalla mostrar: gerente/admin →
+// tablero del gerente; promotor → app de campo.
 router.get("/auth/session", requireAuth, async (req, res) => {
+  const role = req.promoter.role || "promotor";
+
+  // ADMIN / GERENTE / SUPERVISOR viven en la pestaña "Usuarios", NO en el
+  // listado de promotores. No exigimos una ficha de promotor para ellos.
+  if (role === "gerente" || role === "admin" || role === "supervisor") {
+    return res.json({
+      id: req.promoter.id,
+      name: req.promoter.name,
+      role,
+      checkInRadiusMeters: config.rangeMeters,
+    });
+  }
+
   const promoter = await findPromoterById(req.promoter.id);
   if (!promoter) return res.status(401).json({ message: "Sesión inválida" });
   return res.json({
     id: promoter.id,
     name: promoter.name,
+    role,
     location: promoter.location,
     supervisor: promoter.supervisor,
     // Radio de check-in/out (m) que aplica el servidor. El frontend lo usa para

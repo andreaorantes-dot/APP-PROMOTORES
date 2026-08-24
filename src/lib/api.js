@@ -112,6 +112,10 @@ export const api = {
   // Today's visit records for the signed-in promoter.
   visitsToday: (signal) => request("/visits/today", { signal }),
 
+  // Meta mensual (unidades) del promotor logueado y su avance del mes.
+  // { target, achieved, reached } o null si no tiene meta asignada.
+  myGoal: (signal) => request("/visits/my-goal", { signal }),
+
   // --- Retroalimentación --------------------------------------------------
   // Envía un reporte de error/problema del asesor. Se guarda como una fila en
   // la pestaña de retroalimentación del Google Sheet del administrador.
@@ -120,6 +124,44 @@ export const api = {
       method: "POST",
       body: { idPromotor, nombre, sucursal, descripcion, ubicacion },
     }),
+
+  // --- Competencia ---------------------------------------------------------
+  // Reporta una acción/estrategia de la competencia (marca, descripción, hasta
+  // 5 fotos como data URL). Se guarda en la base de datos y en una pestaña del
+  // Sheet ("Competencia") como resumen.
+  sendCompetitionReport: ({ marca, descripcion, fotos }) =>
+    request("/competition", {
+      method: "POST",
+      body: { marca, descripcion, fotos },
+    }),
+
+  // --- Gerente / Admin ----------------------------------------------------
+  // Resumen para el tablero del gerente (requiere rol gerente/admin en el
+  // servidor). `range` es "today" | "week" | "month" | "year"; sin él usa "today".
+  managerSummary: (range, signal) =>
+    request(`/manager/summary${range ? `?range=${encodeURIComponent(range)}` : ""}`, { signal }),
+
+  // Fija la meta mensual (unidades) de un promotor. Solo admin/gerente.
+  setPromoterGoal: (promoterId, meta, nombre) =>
+    request(`/manager/promoter/${encodeURIComponent(promoterId)}/goal`, {
+      method: "PUT",
+      body: { meta, nombre },
+    }),
+
+  // --- Supervisor -----------------------------------------------------------
+  // Mismo resumen que el del gerente, pero acotado a SUS promotores (lo filtra
+  // el servidor por el ID de sesión del supervisor).
+  supervisorSummary: (range, signal) =>
+    request(`/supervisor/summary${range ? `?range=${encodeURIComponent(range)}` : ""}`, { signal }),
+
+  // --- Notificaciones (campana) ---------------------------------------------
+  // Admin/gerente reciben las de "admin" + un insight de Top 5 en vivo;
+  // supervisor recibe las suyas (check-in de sus promotores, metas alcanzadas).
+  notifications: (signal) => request("/notifications", { signal }),
+
+  // --- Perfil de promotor (historial) ---------------------------------------
+  promoterProfile: (promoterId, signal) =>
+    request(`/promoters/${encodeURIComponent(promoterId)}/profile`, { signal }),
 };
 
 export { ApiError };

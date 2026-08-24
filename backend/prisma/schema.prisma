@@ -1,7 +1,8 @@
 // Esquema de datos — App Promotores
 // Motor: PostgreSQL (persistente). El DATABASE_URL viene del entorno:
-// en Render lo provee el servicio de Postgres; en local, tu .env.
-// El resto del código (queries Prisma) es idéntico al de SQLite.
+// en Render lo provee el servicio de Postgres; en local, tu .env (o "sqlite"
+// para desarrollo local — ese cambio de provider se gestiona con skip-worktree
+// y nunca se sube al repo). El resto del código (queries Prisma) es idéntico.
 
 generator client {
   provider = "prisma-client-js"
@@ -13,13 +14,14 @@ datasource db {
 }
 
 model Promoter {
-  id         String        @id // ID de promotor (número de la BBDD)
-  name       String
-  location   String? // UBICACION
-  supervisor String? // SUPERVISOR
-  password   String // hash bcrypt de la contraseña (nunca en texto plano)
-  createdAt  DateTime      @default(now())
-  visits     VisitRecord[]
+  id                 String              @id // ID de promotor (número de la BBDD)
+  name               String
+  location           String? // UBICACION
+  supervisor         String? // SUPERVISOR
+  password           String // hash bcrypt de la contraseña (nunca en texto plano)
+  createdAt          DateTime            @default(now())
+  visits             VisitRecord[]
+  competitionReports CompetitionReport[]
 }
 
 // Catálogo GLOBAL de tiendas (sin asignación por promotor). La visibilidad se
@@ -30,6 +32,7 @@ model Store {
   address String
   lat     Float
   lng     Float
+  estado  String? // ESTADO de México (columna "Estado" de la pestaña Tiendas). Usado por el filtro del gerente.
   visits  VisitRecord[]
 }
 
@@ -53,4 +56,20 @@ model VisitRecord {
 
   @@unique([promoterId, storeId, day])
   @@index([promoterId, day])
+}
+
+// Reporte de acciones/estrategias de la competencia, capturado desde la
+// pantalla "Competencia" de la app del promotor. Las fotos se guardan aquí
+// (Base64, como VisitRecord.photo) — un Sheet no es buen lugar para binarios;
+// el Sheet solo recibe una fila-resumen (ver competitionSheet.js).
+model CompetitionReport {
+  id          String   @id @default(uuid())
+  promoter    Promoter @relation(fields: [promoterId], references: [id])
+  promoterId  String
+  marca       String
+  descripcion String
+  photos      String? // JSON: array de fotos en Base64 (data URL)
+  createdAt   DateTime @default(now())
+
+  @@index([promoterId])
 }

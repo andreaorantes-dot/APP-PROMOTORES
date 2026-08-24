@@ -13,6 +13,11 @@ import authRoutes from "./routes/auth.js";
 import storeRoutes from "./routes/stores.js";
 import visitRoutes from "./routes/visits.js";
 import feedbackRoutes from "./routes/feedback.js";
+import managerRoutes from "./routes/manager.js";
+import supervisorRoutes from "./routes/supervisor.js";
+import notificationsRoutes from "./routes/notifications.js";
+import promoterProfileRoutes from "./routes/promoterProfile.js";
+import competitionRoutes from "./routes/competition.js";
 
 // Robustez: un error no capturado en una petición NO debe tumbar el servidor
 // (si se cae, TODOS los promotores pierden el servicio). Registramos y seguimos.
@@ -56,6 +61,11 @@ app.use("/api", authRoutes); // expone /api/login, /api/auth/session, /api/auth/
 app.use("/api/stores", storeRoutes); // GET /api/stores?lat&lng (tiendas cercanas)
 app.use("/api/visits", visitRoutes);
 app.use("/api/feedback", feedbackRoutes); // POST /api/feedback (retroalimentación)
+app.use("/api/manager", managerRoutes); // GET /api/manager/summary (gerente/admin)
+app.use("/api/supervisor", supervisorRoutes); // GET /api/supervisor/summary (solo sus promotores)
+app.use("/api/notifications", notificationsRoutes); // GET /api/notifications (campana)
+app.use("/api/promoters", promoterProfileRoutes); // GET /api/promoters/:id/profile (historial)
+app.use("/api/competition", competitionRoutes); // POST /api/competition (reportes de competencia)
 
 // Diagnóstico de Google Sheets (requiere sesión): verifica credenciales y acceso
 // al documento sin necesidad de un check-out real.

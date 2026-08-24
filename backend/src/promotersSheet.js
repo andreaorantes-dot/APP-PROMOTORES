@@ -87,3 +87,12 @@ export async function findPromoterInSheet(promoterId) {
   const { byId } = await ensureCache();
   return byId.get(String(promoterId).trim()) ?? null;
 }
+
+// Todos los promotores del Sheet, indexados por ID. Lo usa activitySheet.js
+// para saber el SUPERVISOR de cada promotor sin depender de que ya exista una
+// fila en la base local (que solo se crea cuando ese promotor inició sesión
+// alguna vez en ESTE backend).
+export async function getAllPromotersFromSheet() {
+  const { byId } = await ensureCache();
+  return byId;
+}

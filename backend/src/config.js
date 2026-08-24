@@ -20,6 +20,11 @@ export const config = {
   // pestaña Tiendas del Sheet hacia la base local).
   storesSource: (process.env.STORES_SOURCE ?? "db").toLowerCase(),
 
+  // Origen de las VISITAS para el resumen del gerente: "db" (Prisma, la fuente
+  // real en producción) o "sheet" (lee la pestaña de auditoría de check-out,
+  // útil en desarrollo local donde la base local no tiene la actividad real).
+  visitsSource: (process.env.VISITS_SOURCE ?? "db").toLowerCase(),
+
   session: {
     secret: required("SESSION_SECRET", "insecure-dev-secret"),
     ttlSeconds: Number(process.env.SESSION_TTL_SECONDS ?? 28800),
@@ -34,6 +39,16 @@ export const config = {
 
   // Radio (m) para listar tiendas cercanas en GET /api/stores?lat&lng.
   nearbyRadiusMeters: Number(process.env.NEARBY_RADIUS_METERS ?? 2000),
+
+  // --- Precios de venta (para el resumen del gerente) ----------------------
+  // El check-out solo captura CANTIDADES (rollos y cubetas). Para mostrar el
+  // "dinero vendido" en la pantalla del gerente, multiplicamos cada cantidad por
+  // su precio unitario. Se definen por variable de entorno para poder ajustarlos
+  // sin tocar código. Si quedan en 0, el dashboard muestra $0 (recuerda ponerlos).
+  prices: {
+    rollo: Number(process.env.PRECIO_ROLLO ?? 0),
+    cubeta: Number(process.env.PRECIO_CUBETA ?? 0),
+  },
 
   // --- Google Sheets (solo para el administrador) --------------------------
   // Al hacer check-out, el backend agrega una fila con los datos de la visita.
@@ -53,5 +68,18 @@ export const config = {
     promotersTab: process.env.GOOGLE_SHEETS_PROMOTERS_TAB ?? "Promotores",
     // Pestaña de tiendas (usada cuando STORES_SOURCE=sheet).
     tiendasTab: process.env.GOOGLE_SHEETS_TIENDAS_TAB ?? "Tiendas",
+    // Pestaña de usuarios administrativos (admin/gerente), separada de los
+    // promotores. Login de gerentes/admin se valida contra esta pestaña.
+    usuariosTab: process.env.GOOGLE_SHEETS_USUARIOS_TAB ?? "Usuarios",
+    // Pestaña de auditoría de check-out (usada cuando VISITS_SOURCE=sheet).
+    actividadTab: process.env.GOOGLE_SHEETS_ACTIVIDAD_TAB ?? "Actividad Diaria",
+    // Metas de venta mensuales (por promotor y por tienda, en unidades).
+    metasTab: process.env.GOOGLE_SHEETS_METAS_TAB ?? "Metas",
+    // Notificaciones (check-in, meta alcanzada) para supervisores/admin.
+    notificacionesTab: process.env.GOOGLE_SHEETS_NOTIFICACIONES_TAB ?? "Notificaciones",
+    // Reportes de competencia (marca, descripción) que envían los promotores.
+    // Las fotos NO van aquí (ver CompetitionReport en la base de datos); esta
+    // pestaña es solo un resumen para que el admin lo revise sin abrir la app.
+    competenciaTab: process.env.GOOGLE_SHEETS_COMPETENCIA_TAB ?? "Competencia",
   },
 };

@@ -41,7 +41,7 @@ function slugify(s) {
 
 // Parsea las filas de la pestaña Tiendas detectando columnas por encabezado.
 function parseTiendas(rows) {
-  let header = -1, numC = -1, nameC = -1, latC = -1, lngC = -1;
+  let header = -1, numC = -1, nameC = -1, latC = -1, lngC = -1, estadoC = -1;
   for (let r = 0; r < rows.length; r++) {
     const cells = rows[r].map((c) => String(c ?? "").trim());
     const lat = cells.findIndex((c) => /^lat|latitud/i.test(c));
@@ -50,6 +50,8 @@ function parseTiendas(rows) {
       header = r; latC = lat; lngC = lng;
       numC = cells.findIndex((c) => /n[uú]m/i.test(c));
       nameC = cells.findIndex((c, i) => i !== numC && /tienda|nombre|sucursal/i.test(c));
+      // Columna ESTADO (opcional): la usa el filtro "por estado" del gerente.
+      estadoC = cells.findIndex((c) => /^estado$|entidad/i.test(c));
       break;
     }
   }
@@ -65,7 +67,8 @@ function parseTiendas(rows) {
     const name = (nameC !== -1 ? String(cells[nameC] ?? "").trim() : "") || `Tienda ${num || ""}`.trim();
     const id = num || slugify(name);
     if (!id) continue;
-    out.push({ id, name, address: num ? `Tienda #${num}` : name, lat, lng });
+    const estado = estadoC !== -1 ? String(cells[estadoC] ?? "").trim() || null : null;
+    out.push({ id, name, address: num ? `Tienda #${num}` : name, lat, lng, estado });
   }
   return out;
 }

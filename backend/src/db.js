@@ -8,10 +8,12 @@ import { prisma, withWriteRetry } from "./prisma.js";
 import { config } from "./config.js";
 import { findPromoterInSheet } from "./promotersSheet.js";
 import { ensureStoresSynced } from "./storesSheet.js";
-
-function todayKey() {
-  return new Date().toISOString().slice(0, 10);
-}
+import { summarizeVisitRows } from "./managerSummary.js";
+import { fetchVisitRowsFromSheet } from "./activitySheet.js";
+import { todayKey, resolveRange } from "./businessDay.js";
+import { getPromoterGoal, getStoreGoal, setPromoterGoal as setPromoterGoalInSheet } from "./goalsSheet.js";
+import { appendNotification, hasGoalNotification } from "./notificationsSheet.js";
+import { appendCompetitionRow } from "./competitionSheet.js";
 
 // --- Promotores ------------------------------------------------------------
 
@@ -60,6 +62,27 @@ export async function getVisit(promoterId, storeId) {
   });
 }
 
+// Con AUTH_SOURCE=sheet los promotores viven en el Google Sheet, no en
+// Postgres, pero VisitRecord/CompetitionReport tienen una llave foránea a
+// Promoter. Asegura que exista su fila local (con el hash del Sheet) para no
+// violar esa restricción al guardar. Idempotente: si ya existe, no toca nada.
+async function ensurePromoterExistsLocally(promoterId) {
+  if (config.authSource !== "sheet") return;
+  const p = await findPromoterInSheet(promoterId);
+  if (!p) return;
+  await prisma.promoter.upsert({
+    where: { id: p.id },
+    update: {},
+    create: {
+      id: p.id,
+      name: p.name || p.id,
+      location: p.location ?? null,
+      supervisor: p.supervisor ?? null,
+      password: p.password ?? "",
+    },
+  });
+}
+
 // Crea o actualiza (upsert) el registro de visita del día. Convierte los campos
 // de fecha a Date para Prisma. Devuelve el registro persistido.
 export async function submitVisitReport(promoterId, storeId, patch) {
@@ -68,26 +91,7 @@ export async function submitVisitReport(promoterId, storeId, patch) {
   if (typeof data.checkInTime === "string") data.checkInTime = new Date(data.checkInTime);
   if (typeof data.checkOutTime === "string") data.checkOutTime = new Date(data.checkOutTime);
 
-  // Con AUTH_SOURCE=sheet los promotores viven en el Google Sheet, no en Postgres,
-  // pero VisitRecord tiene una llave foránea a Promoter. Aseguramos que exista la
-  // fila del promotor (con su hash del Sheet) para no violar esa restricción al
-  // guardar la visita. Idempotente: si ya existe, no toca nada.
-  if (config.authSource === "sheet") {
-    const p = await findPromoterInSheet(promoterId);
-    if (p) {
-      await prisma.promoter.upsert({
-        where: { id: p.id },
-        update: {},
-        create: {
-          id: p.id,
-          name: p.name || p.id,
-          location: p.location ?? null,
-          supervisor: p.supervisor ?? null,
-          password: p.password ?? "",
-        },
-      });
-    }
-  }
+  await ensurePromoterExistsLocally(promoterId);
 
   // withWriteRetry: reintenta ante bloqueos de SQLite bajo carga concurrente.
   return withWriteRetry(() =>
@@ -97,4 +101,256 @@ export async function submitVisitReport(promoterId, storeId, patch) {
       update: { ...data },
     })
   );
+}
+
+// --- Reportes de competencia -------------------------------------------------
+// Guarda el reporte COMPLETO (con fotos) en la base de datos y, best-effort,
+// una fila-resumen en el Sheet "Competencia" para que el admin lo revise sin
+// abrir la app.
+export async function createCompetitionReport(promoterId, { marca, descripcion, photos }) {
+  await ensurePromoterExistsLocally(promoterId);
+
+  const report = await withWriteRetry(() =>
+    prisma.competitionReport.create({
+      data: { promoterId, marca, descripcion, photos: photos?.length ? JSON.stringify(photos) : null },
+    })
+  );
+
+  // appendCompetitionRow nunca lanza (best-effort): el reporte ya quedó a
+  // salvo en la base de datos aunque el Sheet falle.
+  const promoter = await findPromoterById(promoterId);
+  await appendCompetitionRow({
+    promoterId,
+    promoterName: promoter?.name || promoterId,
+    marca,
+    descripcion,
+    photoCount: photos?.length || 0,
+  });
+
+  return report;
+}
+
+// --- Resumen para el GERENTE -------------------------------------------------
+// Agrega TODAS las visitas de un RANGO de días ("today" | "week" | "month" |
+// "year", por defecto "today") y las agrupa por promotor. Calcula el "dinero
+// vendido" multiplicando cantidades por los precios de config (PRECIO_ROLLO /
+// PRECIO_CUBETA). Devuelve totales globales, el desglose por estado (para las
+// gráficas) y un arreglo de promotores activos.
+//
+// "PROMOTOR ACTIVO" = tiene al menos un registro de visita en el rango (el
+// check-in crea el registro), sin importar si ya cerró o sigue en tienda.
+//
+// `supervisorId` (opcional) restringe el resultado a los promotores de ESE
+// supervisor (comparando, sin distinguir mayúsculas, contra la columna
+// SUPERVISOR de la pestaña Promotores) — así el tablero de supervisor
+// reutiliza exactamente la misma agregación que el del gerente.
+export async function getManagerSummary(rangeKey = "today", { supervisorId } = {}) {
+  // Asegura que las tiendas (con su ESTADO) estén sincronizadas desde el Sheet.
+  if (config.storesSource === "sheet") await ensureStoresSynced();
+
+  const range = resolveRange(rangeKey);
+
+  // Con VISITS_SOURCE=sheet (solo para desarrollo local) reconstruimos las
+  // visitas del rango desde la pestaña de auditoría del Sheet, porque la base
+  // local no tiene la actividad real (esa vive en el Postgres de producción).
+  let rows =
+    config.visitsSource === "sheet"
+      ? await fetchVisitRowsFromSheet(range)
+      : await prisma.visitRecord.findMany({
+          where: { day: { gte: range.from, lte: range.to } },
+          include: { promoter: true, store: true },
+        });
+
+  if (supervisorId) {
+    rows = rows.filter((r) => (r.promoter?.supervisor || "").trim().toLowerCase() === supervisorId);
+  }
+
+  // La agregación pura vive en managerSummary.js (testeable sin base de datos).
+  const summary = summarizeVisitRows(rows, config.prices, range);
+  await attachGoalProgress(summary);
+  return summary;
+}
+
+// Mismo resumen, pero acotado a los promotores de un supervisor.
+export async function getSupervisorSummary(supervisorId, rangeKey = "today") {
+  return getManagerSummary(rangeKey, { supervisorId });
+}
+
+// --- Metas: progreso mensual por promotor -----------------------------------
+// Le agrega `goal: { target, achieved, reached }` a cada promotor del resumen
+// (o `goal: null` si no tiene meta definida en el Sheet). El acumulado del mes
+// se calcula con la MISMA fuente que el resto del tablero (VISITS_SOURCE): así
+// en desarrollo local (Sheet) el avance de meta coincide con lo que ya se ve
+// en pantalla, y en producción (base de datos) es el acumulado real.
+async function attachGoalProgress(summary) {
+  const month = resolveRange("month");
+  const monthRows =
+    config.visitsSource === "sheet"
+      ? await fetchVisitRowsFromSheet(month)
+      : await prisma.visitRecord.findMany({
+          where: { day: { gte: month.from, lte: month.to } },
+          select: { promoterId: true, rollos: true, cubetas: true },
+        });
+
+  const achievedByPromoter = new Map();
+  for (const r of monthRows) {
+    achievedByPromoter.set(r.promoterId, (achievedByPromoter.get(r.promoterId) || 0) + (r.rollos || 0) + (r.cubetas || 0));
+  }
+
+  for (const p of summary.promoters) {
+    const target = await getPromoterGoal(p.id);
+    const achieved = achievedByPromoter.get(p.id) ?? 0;
+    p.goal = target ? { target, achieved, reached: achieved >= target } : null;
+  }
+}
+
+// --- Notificaciones disparadas por check-in / check-out ---------------------
+
+// Se llama al hacer CHECK-IN: avisa al supervisor del promotor (si tiene uno)
+// con la tienda y el nombre del asesor. Best-effort: nunca lanza.
+export async function notifyCheckIn(promoterId, storeId) {
+  try {
+    const [promoter, store] = await Promise.all([findPromoterById(promoterId), getStore(storeId)]);
+    const supervisorId = (promoter?.supervisor || "").trim().toLowerCase();
+    if (!supervisorId) return; // sin supervisor asignado, no hay a quién avisar
+    await appendNotification({
+      tipo: "checkin",
+      para: supervisorId,
+      idPromotor: promoterId,
+      promotor: promoter?.name || promoterId,
+      idTienda: storeId,
+      tienda: store?.name || storeId,
+      detalle: `${promoter?.name || promoterId} hizo check-in en ${store?.name || storeId}.`,
+    });
+  } catch (e) {
+    console.error("[db] notifyCheckIn falló:", e.message);
+  }
+}
+
+// Unidades (rollos+cubetas) que un promotor lleva vendidas ESTE MES, siempre
+// desde la base de datos real (el check-out de un promotor ya escribe ahí sin
+// importar VISITS_SOURCE — eso solo afecta cómo se reconstruye la vista del
+// gerente/supervisor en desarrollo local).
+async function monthToDateUnitsForPromoter(promoterId, month = resolveRange("month")) {
+  const sum = await prisma.visitRecord.aggregate({
+    where: { promoterId, day: { gte: month.from, lte: month.to } },
+    _sum: { rollos: true, cubetas: true },
+  });
+  return (sum._sum.rollos || 0) + (sum._sum.cubetas || 0);
+}
+
+// Meta y avance del MES del promotor logueado — lo consume su propia app
+// ("Mi meta de ventas" en el dashboard de campo).
+export async function getMyGoalProgress(promoterId) {
+  const target = await getPromoterGoal(promoterId);
+  if (!target) return null;
+  const achieved = await monthToDateUnitsForPromoter(promoterId);
+  return { target, achieved, reached: achieved >= target };
+}
+
+// Fija (crea o reemplaza) la meta MENSUAL de un promotor, en unidades. Lo usa
+// el botón "Meta" del tablero del gerente/admin. `nombre` es solo para que la
+// fila del Sheet sea legible a simple vista.
+export async function setPromoterGoal(promoterId, meta, nombre) {
+  await setPromoterGoalInSheet(promoterId, meta, nombre);
+}
+
+// Se llama al hacer CHECK-OUT: si el promotor o la tienda ya llegaron a su
+// meta MENSUAL (unidades = rollos+cubetas), notifica UNA sola vez por mes
+// (idempotente vía hasGoalNotification, no por detección exacta del cruce).
+export async function checkAndNotifyGoals(promoterId, storeId) {
+  try {
+    const month = resolveRange("month");
+    const periodo = month.from.slice(0, 7); // "YYYY-MM"
+
+    const promoterGoal = await getPromoterGoal(promoterId);
+    if (promoterGoal) {
+      const achieved = await monthToDateUnitsForPromoter(promoterId, month);
+      if (achieved >= promoterGoal && !(await hasGoalNotification({ tipo: "promoter_goal", id: promoterId, periodo }))) {
+        const promoter = await findPromoterById(promoterId);
+        const supervisorId = (promoter?.supervisor || "").trim().toLowerCase();
+        await appendNotification({
+          tipo: "promoter_goal",
+          para: supervisorId || "admin",
+          idPromotor: promoterId,
+          promotor: promoter?.name || promoterId,
+          periodo,
+          detalle: `${promoter?.name || promoterId} alcanzó su meta mensual (${achieved}/${promoterGoal} unidades).`,
+        });
+      }
+    }
+
+    const storeGoal = await getStoreGoal(storeId);
+    if (storeGoal) {
+      const sum = await prisma.visitRecord.aggregate({
+        where: { storeId, day: { gte: month.from, lte: month.to } },
+        _sum: { rollos: true, cubetas: true },
+      });
+      const achieved = (sum._sum.rollos || 0) + (sum._sum.cubetas || 0);
+      if (achieved >= storeGoal && !(await hasGoalNotification({ tipo: "store_goal", id: storeId, periodo }))) {
+        const store = await getStore(storeId);
+        await appendNotification({
+          tipo: "store_goal",
+          para: "admin",
+          idTienda: storeId,
+          tienda: store?.name || storeId,
+          periodo,
+          detalle: `${store?.name || storeId} alcanzó su meta mensual (${achieved}/${storeGoal} unidades).`,
+        });
+      }
+    }
+  } catch (e) {
+    console.error("[db] checkAndNotifyGoals falló:", e.message);
+  }
+}
+
+// --- Perfil del promotor (historial de check-in/check-out) ------------------
+// Últimos `limit` registros de visita (con tienda incluida) + las tiendas a
+// las que va con más frecuencia. Se usa desde el tablero del gerente/admin y
+// del supervisor (que solo puede ver a SUS promotores; esa validación vive en
+// la ruta, no aquí).
+export async function getPromoterProfile(promoterId, limit = 200) {
+  const promoter = await findPromoterById(promoterId);
+  if (!promoter) return null;
+
+  const history = await prisma.visitRecord.findMany({
+    where: { promoterId },
+    include: { store: true },
+    orderBy: [{ day: "desc" }, { checkInTime: "desc" }],
+    take: limit,
+  });
+
+  const storeCounts = new Map();
+  for (const v of history) {
+    const key = v.storeId;
+    if (!storeCounts.has(key)) storeCounts.set(key, { storeId: key, storeName: v.store?.name || key, visits: 0 });
+    storeCounts.get(key).visits += 1;
+  }
+  const frequentStores = [...storeCounts.values()].sort((a, b) => b.visits - a.visits).slice(0, 8);
+
+  return {
+    id: promoter.id,
+    name: promoter.name,
+    location: promoter.location ?? null,
+    supervisor: promoter.supervisor ?? null,
+    frequentStores,
+    history: history.map((v) => ({
+      day: v.day,
+      storeId: v.storeId,
+      storeName: v.store?.name || v.storeId,
+      status: v.status,
+      checkInTime: v.checkInTime,
+      checkOutTime: v.checkOutTime,
+      rollos: v.rollos,
+      cubetas: v.cubetas,
+    })),
+  };
+}
+
+// ¿El promotor `promoterId` es supervisado por `supervisorId` (ID del
+// supervisor, ya en minúsculas)? Se usa para que un supervisor no pueda ver
+// el perfil de un promotor que no es suyo.
+export async function promoterBelongsToSupervisor(promoterId, supervisorId) {
+  const promoter = await findPromoterById(promoterId);
+  return (promoter?.supervisor || "").trim().toLowerCase() === supervisorId;
 }

@@ -5,12 +5,21 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { config } from "./config.js";
 import { findPromoterById } from "./db.js";
+import { findUserInSheet } from "./usersSheet.js";
 import { generateCsrfToken, setCsrfCookie, clearCsrfCookie } from "./csrf.js";
 
 // ---------------------------------------------------------------------------
-// Verifica ID + contraseña contra el hash bcrypt almacenado. Devuelve el
-// promotor (sin el hash) o lanza un error 401 genérico (no revela si falló el
-// ID o la contraseña, para no filtrar qué IDs existen).
+// Verifica ID + contraseña contra el hash bcrypt almacenado. Devuelve la cuenta
+// (sin el hash) o lanza un error 401 genérico (no revela si falló el ID o la
+// contraseña, para no filtrar qué IDs existen).
+//
+// ORDEN DE BÚSQUEDA:
+//   1) Pestaña "Usuarios" (ADMIN / GERENTE). Si el ID está aquí, el rol viene
+//      de ahí (admin o gerente).
+//   2) Listado de promotores. Cualquier cuenta que no esté en "Usuarios" es un
+//      PROMOTOR de campo (rol "promotor").
+//
+// El objeto devuelto SIEMPRE incluye `role`, que viaja dentro del JWT firmado.
 // ---------------------------------------------------------------------------
 export async function authenticate(promoterId, password) {
   const unauthorized = () => {
@@ -20,8 +29,18 @@ export async function authenticate(promoterId, password) {
   };
 
   if (!promoterId || !password) throw unauthorized();
+  const id = String(promoterId).trim();
 
-  const promoter = await findPromoterById(String(promoterId).trim());
+  // 1) ¿Es un usuario administrativo (admin/gerente)?
+  const user = await findUserInSheet(id);
+  if (user) {
+    const ok = await bcrypt.compare(password, user.password || "");
+    if (!ok) throw unauthorized();
+    return { id: user.id, name: user.name, role: user.role };
+  }
+
+  // 2) Si no, se trata como promotor de campo.
+  const promoter = await findPromoterById(id);
   if (!promoter) {
     // Comparación "dummy" para igualar el tiempo de respuesta y mitigar
     // ataques de enumeración por temporización.
@@ -32,7 +51,13 @@ export async function authenticate(promoterId, password) {
   const ok = await bcrypt.compare(password, promoter.password);
   if (!ok) throw unauthorized();
 
-  return { id: promoter.id, name: promoter.name, location: promoter.location, supervisor: promoter.supervisor };
+  return {
+    id: promoter.id,
+    name: promoter.name,
+    location: promoter.location,
+    supervisor: promoter.supervisor,
+    role: "promotor",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -43,7 +68,8 @@ export function issueSession(res, promoter) {
   const csrfToken = generateCsrfToken();
 
   const token = jwt.sign(
-    { sub: promoter.id, name: promoter.name, csrf: csrfToken },
+    // `role` va firmado dentro del JWT: el cliente no puede alterarlo.
+    { sub: promoter.id, name: promoter.name, role: promoter.role || "promotor", csrf: csrfToken },
     config.session.secret,
     { expiresIn: config.session.ttlSeconds }
   );
@@ -75,10 +101,25 @@ export function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ message: "No autenticado" });
   try {
     const claims = jwt.verify(token, config.session.secret);
-    req.promoter = { id: claims.sub, name: claims.name };
+    req.promoter = { id: claims.sub, name: claims.name, role: claims.role || "promotor" };
     next();
   } catch {
     clearSession(res);
     return res.status(401).json({ message: "Sesión inválida o expirada" });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Middleware de autorización por ROL. Úsalo DESPUÉS de requireAuth.
+// Ej.: router.get("/summary", requireAuth, requireRole("gerente", "admin"), ...)
+// Responde 403 si el rol de la sesión no está en la lista permitida.
+// ---------------------------------------------------------------------------
+export function requireRole(...allowed) {
+  return (req, res, next) => {
+    const role = req.promoter?.role || "promotor";
+    if (!allowed.includes(role)) {
+      return res.status(403).json({ message: "No tienes permiso para esta acción" });
+    }
+    next();
+  };
 }

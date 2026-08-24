@@ -1,12 +1,12 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AuthProvider } from "./auth/AuthProvider.jsx";
-import PromotoresApp from "./PromotoresApp.jsx";
+import AppRouter from "./AppRouter.jsx";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <AuthProvider>
-      <PromotoresApp />
+      <AppRouter />
     </AuthProvider>
   </StrictMode>
 );

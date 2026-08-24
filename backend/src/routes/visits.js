@@ -3,7 +3,7 @@ import { requireAuth } from "../auth.js";
 import { config } from "../config.js";
 import { distanceMeters, isValidCoords } from "../geo.js";
 import { getStore, getVisit, fetchTodayVisits, submitVisitReport } from "../db.js";
-import { findPromoterById } from "../db.js";
+import { findPromoterById, notifyCheckIn, checkAndNotifyGoals, getMyGoalProgress } from "../db.js";
 import { appendVisitRow } from "../sheets.js";
 
 const router = Router();
@@ -23,6 +23,19 @@ router.get("/today", async (req, res) => {
   const clean = {};
   for (const [k, v] of Object.entries(records)) clean[k] = stripPhoto(v);
   return res.json({ records: clean });
+});
+
+// GET /api/visits/my-goal -> { target, achieved, reached } | null
+// La meta mensual (unidades) del promotor logueado y su avance del mes,
+// siempre desde la base de datos real (sus propios check-outs).
+router.get("/my-goal", async (req, res) => {
+  try {
+    const goal = await getMyGoalProgress(req.promoter.id);
+    return res.json(goal);
+  } catch (err) {
+    console.error("[visits/my-goal]", err);
+    return res.status(500).json({ message: "No se pudo cargar tu meta" });
+  }
 });
 
 // Valida que el promotor está dentro del rango de la tienda. El SERVIDOR es la
@@ -90,6 +103,10 @@ router.post("/:storeId/check-in", async (req, res) => {
       checkInDistance: distance,
       photo, // persistida en el servidor (en real: blob storage)
     });
+    // Avisa a su supervisor (si tiene uno) que este promotor hizo check-in,
+    // con la tienda. Best-effort: no bloquea el check-in si falla.
+    notifyCheckIn(req.promoter.id, req.params.storeId).catch(() => {});
+
     // No devolvemos la foto cruda; solo metadatos.
     const record = await getVisit(req.promoter.id, req.params.storeId);
     return res.status(201).json(stripPhoto(record));
@@ -129,6 +146,10 @@ router.post("/:storeId/check-out", async (req, res) => {
     } catch (e) {
       console.error("[check-out] Falló el registro en Sheets:", e.message);
     }
+
+    // ¿Este check-out hace que el promotor o la tienda lleguen a su meta
+    // mensual? Best-effort y en segundo plano: no retrasa la respuesta.
+    checkAndNotifyGoals(req.promoter.id, req.params.storeId).catch(() => {});
 
     return res.json(stripPhoto(record));
   } catch (err) {

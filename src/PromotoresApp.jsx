@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
+import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
 import {
   enqueueAction,
   listQueuedActions,
@@ -12,70 +13,10 @@ import {
   readCachedRecords,
 } from "./lib/offlineStore.js";
 
-// ---------------------------------------------------------------------------
-// Paletas de marca Protexa (Manual 2026): Amarillo #F8C000, Negro #221F1C,
-// Blanco #FFFFFF. Dos temas — OSCURO y CLARO — que la app hereda del
-// dispositivo vía `prefers-color-scheme`.
-//
-// Tokens de contraste importantes:
-//   - `accent`     = Amarillo Protexa, SOLO como FONDO de botones/acciones.
-//   - `onAccent`   = texto/ícono SOBRE el amarillo (Negro Protexa).
-//   - `accentText` = color del acento cuando se usa como TEXTO/ícono/borde.
-//                    En oscuro es el amarillo; en claro se oscurece para no
-//                    violar la regla de marca "nunca amarillo sobre blanco".
-// ---------------------------------------------------------------------------
-const PALETTES = {
-  dark: {
-    bg: "#1A1714",
-    surface: "#221F1C", // Negro Protexa
-    surface2: "#2E2A25",
-    border: "#3B352E",
-    text: "#FFFFFF",
-    textMuted: "#B6AE9F",
-    accent: "#F8C000", // Amarillo Protexa
-    accentSoft: "rgba(248,192,0,0.15)",
-    accentText: "#F8C000", // legible sobre superficies oscuras
-    onAccent: "#221F1C", // texto sobre botones amarillos
-    success: "#2DD9A8",
-    successSoft: "rgba(45,217,168,0.14)",
-    onSuccess: "#05231B",
-    danger: "#F2545B",
-    dangerSoft: "rgba(242,84,91,0.14)",
-  },
-  light: {
-    bg: "#FFFFFF",
-    surface: "#FFFFFF",
-    surface2: "#F4F2EE",
-    border: "#E4DFD6",
-    text: "#221F1C", // Negro Protexa
-    textMuted: "#6E675E",
-    accent: "#F8C000", // Amarillo Protexa (fondo de acciones)
-    accentSoft: "rgba(248,192,0,0.20)",
-    accentText: "#221F1C", // en claro el acento-texto es negro (regla: no amarillo sobre blanco)
-    onAccent: "#221F1C", // texto sobre botones amarillos (negro, alto contraste)
-    success: "#137A5B",
-    successSoft: "rgba(19,122,91,0.12)",
-    onSuccess: "#FFFFFF",
-    danger: "#C0343E",
-    dangerSoft: "rgba(192,52,62,0.10)",
-  },
-};
-
-// Detecta el esquema del dispositivo (claro/oscuro). Por defecto: oscuro.
-function detectScheme() {
-  if (typeof window !== "undefined" && window.matchMedia) {
-    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-  }
-  return "dark";
-}
-
-// Objeto de color VIVO: mantiene la MISMA referencia y se actualiza in-place al
-// cambiar el tema, de modo que todos los estilos en línea (que leen COLORS.x en
-// cada render) tomen los nuevos valores cuando el árbol se vuelve a renderizar.
-const COLORS = { ...PALETTES[detectScheme()] };
-function applyScheme(scheme) {
-  Object.assign(COLORS, PALETTES[scheme] || PALETTES.dark);
-}
+// La paleta de marca Protexa (claro/oscuro) y el objeto de color "vivo" COLORS
+// se movieron a ./theme.js para COMPARTIRLOS con la pantalla del gerente
+// (ManagerDashboard.jsx). Aquí solo los importamos; el comportamiento es idéntico.
+import { COLORS, detectScheme, applyScheme } from "./theme.js";
 
 // NOTE: PROMOTERS, GOOGLE_ACCOUNTS and GOOGLE_DOMAIN have been removed.
 // Identity now comes from Google Workspace (OIDC) and the promoter's assigned
@@ -159,6 +100,27 @@ function resizeImage(file, maxDim = 1024, quality = 0.7) {
 // La tipografía de marca es Helvetica (fuente de sistema); no se cargan fuentes
 // web. Se conserva el hook como no-op para no tocar el resto del componente.
 function useGoogleFonts() {}
+
+// Onboarding del PROMOTOR — sube la versión ("v1" -> "v2") cuando se agreguen
+// features nuevas para que todos la vuelvan a ver una vez.
+const ONBOARDING_KEY_PROMOTOR = "onboarding_seen_v1_promotor";
+const ONBOARDING_STEPS_PROMOTOR = [
+  {
+    icon: Navigation,
+    title: "Bienvenido a la nueva versión",
+    body: "El registro de check-in y check-out sigue igual. Aquí te contamos rápido lo nuevo.",
+  },
+  {
+    icon: Trophy,
+    title: "Tu meta de ventas del mes",
+    body: "Ahora ves tu meta real (asignada por tu administrador) y tu avance del mes, con niveles Bronce, Plata y Oro.",
+  },
+  {
+    icon: BarChart3,
+    title: "Reporta a la competencia",
+    body: "Desde \"Competencia\" ya puedes subir hasta 5 fotos como evidencia; tu reporte se guarda automáticamente.",
+  },
+];
 
 function Stepper({ label, value, onChange }) {
   return (
@@ -321,9 +283,6 @@ function MapView({ coords, stores = [] }) {
   );
 }
 
-// META de ventas (placeholder; conectar a una pestaña "Metas" del Sheet).
-const SALES_GOALS = { rollos: 500, cubetas: 200 };
-
 function GoalBar({ label, actual, meta }) {
   const pct = Math.min(100, Math.round((actual / meta) * 100) || 0);
   return (
@@ -345,34 +304,36 @@ function GoalBar({ label, actual, meta }) {
 }
 
 // Barra de meta de ventas con gamificación (nivel + mensaje motivacional).
-// `actual` se suma de las visitas del día; la META es placeholder por ahora.
-function SalesGoals({ records }) {
-  const sums = Object.values(records || {}).reduce(
-    (a, r) => ({ rollos: a.rollos + (r.rollos || 0), cubetas: a.cubetas + (r.cubetas || 0) }),
-    { rollos: 0, cubetas: 0 }
-  );
-  const rPct = Math.min(100, (sums.rollos / SALES_GOALS.rollos) * 100 || 0);
-  const cPct = Math.min(100, (sums.cubetas / SALES_GOALS.cubetas) * 100 || 0);
-  const overall = Math.round((rPct + cPct) / 2);
-  const level = overall >= 75 ? "Nivel Oro" : overall >= 40 ? "Nivel Plata" : "Nivel Bronce";
-  const faltanR = Math.max(0, SALES_GOALS.rollos - sums.rollos);
-  const faltanC = Math.max(0, SALES_GOALS.cubetas - sums.cubetas);
-  const msg =
-    overall >= 100 ? "¡Meta cumplida! Excelente trabajo."
-    : overall >= 75 ? `¡Casi lo logras! Te faltan ${faltanR} rollos y ${faltanC} cubetas.`
-    : overall >= 40 ? `¡Vas muy bien! Te faltan ${faltanR} rollos y ${faltanC} cubetas para tu meta.`
-    : "¡Vamos con todo! Cada visita te acerca a tu meta.";
+// `goal` viene de GET /api/visits/my-goal: { target, achieved, reached }
+// (unidades = rollos+cubetas ACUMULADAS EN EL MES, fijadas por el admin desde
+// su tablero) o `null` si todavía no tiene una meta asignada.
+function SalesGoals({ goal }) {
+  if (!goal) {
+    return (
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
+        <Trophy size={16} color={COLORS.textMuted} style={{ flexShrink: 0, marginTop: 1 }} />
+        <span style={{ fontSize: 12.5, color: COLORS.textMuted, lineHeight: 1.45 }}>Todavía no tienes una meta de ventas asignada este mes.</span>
+      </div>
+    );
+  }
+  const pct = Math.min(100, Math.round((goal.achieved / goal.target) * 100) || 0);
+  const level = pct >= 100 ? "Nivel Oro" : pct >= 50 ? "Nivel Plata" : "Nivel Bronce";
+  const faltan = Math.max(0, goal.target - goal.achieved);
+  const msg = goal.reached
+    ? "¡Meta cumplida este mes! Excelente trabajo."
+    : pct >= 75 ? `¡Casi lo logras! Te faltan ${faltan} unidades este mes.`
+    : pct >= 40 ? `¡Vas muy bien! Te faltan ${faltan} unidades para tu meta del mes.`
+    : "¡Vamos con todo! Cada visita te acerca a tu meta del mes.";
   return (
     <>
       <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>META DE VENTAS</span>
+          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>META DE VENTAS DEL MES</span>
           <span style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.accentSoft, color: COLORS.accentText, fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999 }}>
             <Trophy size={12} /> {level}
           </span>
         </div>
-        <GoalBar label="Rollos" actual={sums.rollos} meta={SALES_GOALS.rollos} />
-        <GoalBar label="Cubetas" actual={sums.cubetas} meta={SALES_GOALS.cubetas} />
+        <GoalBar label="Rollos + cubetas" actual={goal.achieved} meta={goal.target} />
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.successSoft, border: `1px solid ${COLORS.success}55`, borderRadius: 12, padding: "10px 12px", marginBottom: 14 }}>
         <Zap size={16} color={COLORS.success} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -408,9 +369,11 @@ export default function PromotoresApp() {
   }, []);
 
   const { status, user, error: authError, login, logout } = useAuth();
+  const onboarding = useOnboarding(ONBOARDING_KEY_PROMOTOR);
 
   const [screen, setScreen] = useState("dashboard");
   const [records, setRecords] = useState({});
+  const [myGoal, setMyGoal] = useState(null); // { target, achieved, reached } | null
   const [selectedStore, setSelectedStore] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -433,12 +396,16 @@ export default function PromotoresApp() {
   const [showSheet, setShowSheet] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false); // modal de retroalimentación
 
-  // Formulario de Competencia (interfaz; la persistencia se conecta después).
+  // Formulario de Competencia: se guarda en la base de datos (con fotos) y en
+  // una pestaña del Sheet ("Competencia") como resumen para el admin.
   const [compMarca, setCompMarca] = useState("");
   const [compDesc, setCompDesc] = useState("");
-  const [compFotos, setCompFotos] = useState([]); // data URLs (previsualización)
+  const [compFotos, setCompFotos] = useState([]); // [{ name, dataUrl }] — dataUrl sirve para previsualizar Y para enviar
   const [compSent, setCompSent] = useState(false);
+  const [compSending, setCompSending] = useState(false);
+  const [compError, setCompError] = useState("");
   const compFileRef = useRef(null);
+  const MAX_COMP_FOTOS = 5;
   const [rollos, setRollos] = useState(0);
   const [cubetas, setCubetas] = useState(0);
   const [photo, setPhoto] = useState(null); // foto de check-in (Base64), obligatoria
@@ -529,6 +496,19 @@ export default function PromotoresApp() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
+
+  // Meta de ventas del mes (la fija el admin desde su tablero). Se recarga
+  // cada vez que cambian los registros de hoy, para reflejar un check-out
+  // recién hecho sin esperar a recargar la página.
+  useEffect(() => {
+    if (status !== "authed") return;
+    let active = true;
+    api
+      .myGoal()
+      .then((g) => { if (active) setMyGoal(g); })
+      .catch(() => {}); // sin meta asignada o sin red: se queda en null
+    return () => { active = false; };
+  }, [status, records]);
 
   // Obtiene la ubicación GPS real y pide al backend las tiendas cercanas
   // (Haversine, radio ~2 km). No hay asignación fija por promotor.
@@ -754,6 +734,7 @@ export default function PromotoresApp() {
   async function handleLogout() {
     await logout();
     setRecords({});
+    setMyGoal(null);
     setSelectedStore(null);
     setNearbyStores([]);
     setDashCoords(null);
@@ -768,16 +749,38 @@ export default function PromotoresApp() {
     setScreen(key);
   }
 
-  // Fotos del formulario de Competencia (previsualización en el cliente).
+  // Fotos del formulario de Competencia: se redimensionan a data URL (igual
+  // que la foto de check-in) porque son las que realmente se envían al
+  // servidor — no un blob URL, que solo existe en esta pestaña del navegador.
   async function handleCompFotos(e) {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
-    for (const file of files) {
+    const room = MAX_COMP_FOTOS - compFotos.length;
+    for (const file of files.slice(0, room)) {
       try {
-        setCompFotos((prev) => [...prev, { name: file.name, url: URL.createObjectURL(file) }]);
+        const dataUrl = await resizeImage(file, 900, 0.6);
+        setCompFotos((prev) => [...prev, { name: file.name, dataUrl }]);
       } catch {
         /* ignora archivos inválidos */
       }
+    }
+  }
+
+  async function handleSendCompetition() {
+    if (compSending || !compMarca.trim() || !compDesc.trim()) return;
+    setCompSending(true);
+    setCompError("");
+    try {
+      await api.sendCompetitionReport({
+        marca: compMarca.trim(),
+        descripcion: compDesc.trim(),
+        fotos: compFotos.map((f) => f.dataUrl),
+      });
+      setCompSent(true);
+    } catch (e) {
+      setCompError(e instanceof ApiError ? e.message : "No hay conexión. Revisa tu internet e intenta de nuevo.");
+    } finally {
+      setCompSending(false);
     }
   }
 
@@ -859,14 +862,15 @@ export default function PromotoresApp() {
   if (screen === "dashboard") {
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} onHelp={onboarding.show} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {onboarding.open && <OnboardingTour steps={ONBOARDING_STEPS_PROMOTOR} onClose={onboarding.dismiss} />}
         <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>TU UBICACIÓN</span>
           <MapView coords={dashCoords} stores={allStores} />
 
-          <SalesGoals records={records} />
+          <SalesGoals goal={myGoal} />
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>
@@ -1145,10 +1149,10 @@ export default function PromotoresApp() {
               </div>
               <p style={{ color: COLORS.text, fontWeight: 600, margin: "0 0 6px" }}>¡Reporte capturado!</p>
               <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 18px", lineHeight: 1.5 }}>
-                El guardado en el servidor se conectará próximamente (misma integración de fotos que el check-in).
+                Gracias, tu reporte de competencia ya se guardó.
               </p>
               <button
-                onClick={() => { setCompSent(false); setCompMarca(""); setCompDesc(""); setCompFotos([]); }}
+                onClick={() => { setCompSent(false); setCompMarca(""); setCompDesc(""); setCompFotos([]); setCompError(""); }}
                 style={{ padding: "11px 20px", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontWeight: 700, fontSize: 14, cursor: "pointer" }}
               >
                 Nuevo reporte
@@ -1166,19 +1170,21 @@ export default function PromotoresApp() {
                 <textarea value={compDesc} onChange={(e) => setCompDesc(e.target.value)} rows={4} maxLength={2000} placeholder="Qué observaste: precio, promoción, material…" style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontSize: 15, width: "100%", resize: "vertical", minHeight: 80, lineHeight: 1.5, display: "block" }} />
               </div>
 
-              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Evidencia (fotos)</label>
+              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Evidencia (fotos, hasta {MAX_COMP_FOTOS})</label>
               <input ref={compFileRef} type="file" accept="image/*" multiple onChange={handleCompFotos} style={{ display: "none" }} />
-              <button
-                onClick={() => compFileRef.current && compFileRef.current.click()}
-                style={{ width: "100%", padding: "16px 0", borderRadius: 12, border: `1.5px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-              >
-                <ImagePlus size={16} color={COLORS.accentText} /> Subir fotos
-              </button>
+              {compFotos.length < MAX_COMP_FOTOS && (
+                <button
+                  onClick={() => compFileRef.current && compFileRef.current.click()}
+                  style={{ width: "100%", padding: "16px 0", borderRadius: 12, border: `1.5px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                >
+                  <ImagePlus size={16} color={COLORS.accentText} /> Subir fotos
+                </button>
+              )}
               {compFotos.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
                   {compFotos.map((f, i) => (
                     <div key={i} style={{ position: "relative", width: 72, height: 72, borderRadius: 10, overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
-                      <img src={f.url} alt={f.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <img src={f.dataUrl} alt={f.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                       <button
                         onClick={() => setCompFotos((prev) => prev.filter((_, j) => j !== i))}
                         style={{ position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -1190,16 +1196,20 @@ export default function PromotoresApp() {
                 </div>
               )}
 
+              {compError && (
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.dangerSoft, color: COLORS.danger, borderRadius: 10, padding: "10px 12px", fontSize: 12.5, marginTop: 14, lineHeight: 1.4 }}>
+                  <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{compError}</span>
+                </div>
+              )}
+
               <button
-                onClick={() => canSendComp && setCompSent(true)}
-                disabled={!canSendComp}
-                style={{ width: "100%", marginTop: 18, padding: "14px 0", borderRadius: 12, border: "none", background: canSendComp ? COLORS.accent : COLORS.surface2, color: canSendComp ? COLORS.onAccent : COLORS.textMuted, fontWeight: 700, fontSize: 15, cursor: canSendComp ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                onClick={handleSendCompetition}
+                disabled={!canSendComp || compSending}
+                style={{ width: "100%", marginTop: 18, padding: "14px 0", borderRadius: 12, border: "none", background: canSendComp && !compSending ? COLORS.accent : COLORS.surface2, color: canSendComp && !compSending ? COLORS.onAccent : COLORS.textMuted, fontWeight: 700, fontSize: 15, cursor: canSendComp && !compSending ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
               >
-                <Send size={16} /> Enviar reporte
+                <Send size={16} /> {compSending ? "Enviando…" : "Enviar reporte"}
               </button>
-              <p style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 10, lineHeight: 1.5 }}>
-                Nota: la interfaz está lista; el guardado en el servidor (info + fotos) se conectará en la siguiente fase.
-              </p>
             </>
           )}
         </div>
@@ -1255,12 +1265,21 @@ function Brand() {
   );
 }
 
-function TopBar({ user, onFeedback, onProfile }) {
+function TopBar({ user, onFeedback, onProfile, onHelp }) {
   const initials = (user.name || user.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: `1px solid ${COLORS.border}` }}>
       <Brand />
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {onHelp && (
+          <button
+            onClick={onHelp}
+            title="Ver novedades"
+            style={{ width: 34, height: 34, borderRadius: "50%", background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.textMuted, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+          >
+            <HelpCircle size={16} />
+          </button>
+        )}
         {onFeedback && (
           <button
             onClick={onFeedback}
