@@ -49,6 +49,22 @@ function startOfYear(day) {
   return `${y}-01-01`;
 }
 
+// Suma (o resta, con n negativo) días a una clave "YYYY-MM-DD". Mismo truco
+// de Date.UTC que isoWeekdayOf/startOfWeek: es aritmética sobre el triple
+// año/mes/día, no un instante real, así que no hay zona horaria que cuidar.
+function addDays(day, n) {
+  const [y, m, d] = day.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + n);
+  return date.toISOString().slice(0, 10);
+}
+
+function startOfPrevMonth(day) {
+  const [y, m] = day.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1 - 1, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01`;
+}
+
 // Resuelve las palabras clave del dropdown de rango del tablero del gerente a
 // un rango de días [from, to] (ambos inclusive, en hora de México). Rango
 // desconocido -> "today" (mismo comportamiento que antes de tener rangos).
@@ -61,6 +77,22 @@ export function resolveRange(rangeKey) {
       return { from: startOfMonth(today), to: today };
     case "year":
       return { from: startOfYear(today), to: today };
+    case "yesterday": {
+      const y = addDays(today, -1);
+      return { from: y, to: y };
+    }
+    case "last_week": {
+      const thisWeekStart = startOfWeek(today);
+      return { from: addDays(thisWeekStart, -7), to: addDays(thisWeekStart, -1) };
+    }
+    case "last_month": {
+      const from = startOfPrevMonth(today);
+      return { from, to: addDays(startOfMonth(today), -1) };
+    }
+    case "last_year": {
+      const prevYear = String(Number(today.slice(0, 4)) - 1);
+      return { from: `${prevYear}-01-01`, to: `${prevYear}-12-31` };
+    }
     case "today":
     default:
       return { from: today, to: today };

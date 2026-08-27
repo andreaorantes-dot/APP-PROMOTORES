@@ -5,7 +5,7 @@
 // "en la app": no hay push real al teléfono, ver decisión en el chat). Muestra
 // un punto rojo cuando hay algo nuevo desde la última vez que se abrió.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Bell, TrendingUp, LogIn, Trophy, Store as StoreIcon, Mail } from "lucide-react";
+import { Bell, TrendingUp, LogIn, Trophy, Store as StoreIcon, Mail, KeyRound } from "lucide-react";
 import { api } from "./lib/api.js";
 import { COLORS } from "./theme.js";
 import { fmtMoney, fmtNum } from "./dashboardShared.jsx";
@@ -17,6 +17,7 @@ function iconFor(tipo) {
   if (tipo === "promoter_goal") return Trophy;
   if (tipo === "store_goal") return StoreIcon;
   if (tipo === "weekly_report") return Mail;
+  if (tipo === "password_recovery") return KeyRound;
   return Bell;
 }
 

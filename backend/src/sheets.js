@@ -27,6 +27,7 @@ const HEADERS = [
   "hora_salida",
   "rollos",
   "cubetas",
+  "galones",
 ];
  
 // Encabezados de la pestaña de retroalimentación (reportes de error de los
@@ -76,14 +77,17 @@ async function getSheetsClient() {
   return sheetsClientPromise;
 }
  
-// Escribe la fila de encabezados si la pestaña está vacía (una vez por proceso).
+// Escribe la fila de encabezados si la pestaña está vacía, o la completa si le
+// faltan columnas al final (p. ej. una pestaña de producción creada antes de
+// agregar "galones" — así no queda una columna de datos sin encabezado).
 async function ensureHeader(sheets) {
   if (headerEnsured) return;
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.sheets.spreadsheetId,
-    range: `${config.sheets.tab}!A1:H1`,
+    range: `${config.sheets.tab}!A1:Z1`,
   });
-  if (!res.data.values || res.data.values.length === 0) {
+  const current = (res.data.values && res.data.values[0]) || [];
+  if (current.length < HEADERS.length) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: config.sheets.spreadsheetId,
       range: `${config.sheets.tab}!A1`,
@@ -184,6 +188,7 @@ export async function appendVisitRow({ promoter, store, record }) {
       record.checkOutTime ?? "", // Hora salida
       record.rollos ?? 0, // Inventario: rollos
       record.cubetas ?? 0, // Inventario: cubetas
+      record.galones ?? 0, // Inventario: galones
     ];
     await sheets.spreadsheets.values.append({
       spreadsheetId: config.sheets.spreadsheetId,

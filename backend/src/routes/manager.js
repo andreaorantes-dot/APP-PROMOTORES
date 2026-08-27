@@ -5,14 +5,14 @@
 // Un promotor de campo que intente llamarlas recibe 403.
 import { Router } from "express";
 import { requireAuth, requireRole } from "../auth.js";
-import { getManagerSummary, setPromoterGoal } from "../db.js";
+import { getManagerSummary, setPromoterGoal, getCompetitionReports } from "../db.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("gerente", "admin"));
 
-const RANGE_KEYS = ["today", "week", "month", "year"];
+const RANGE_KEYS = ["today", "yesterday", "week", "last_week", "month", "last_month", "year", "last_year"];
 
-// GET /api/manager/summary?range=today|week|month|year
+// GET /api/manager/summary?range=today|yesterday|week|last_week|month|last_month|year|last_year
 // Sin `range` (o uno inválido) usa "today". Devuelve totales, desglose por
 // estado y el arreglo de promotores activos (con rollos, cubetas, dinero,
 // ubicación y sus visitas individuales) para ese rango.
@@ -41,6 +41,18 @@ router.put("/promoter/:id/goal", async (req, res) => {
   } catch (err) {
     console.error("[manager/promoter/goal]", err);
     return res.status(500).json({ message: "No se pudo guardar la meta" });
+  }
+});
+
+// GET /api/manager/competencia — reportes de Competencia de TODOS los
+// promotores (marca, descripción, fotos), más recientes primero.
+router.get("/competencia", async (req, res) => {
+  try {
+    const reports = await getCompetitionReports();
+    return res.json({ reports });
+  } catch (err) {
+    console.error("[manager/competencia]", err);
+    return res.status(500).json({ message: "No se pudieron cargar los reportes de competencia" });
   }
 });
 

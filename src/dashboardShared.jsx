@@ -4,7 +4,7 @@
 // fila de promotor, exportación CSV/Excel. Evita duplicar el mapa de Leaflet
 // y las gráficas SVG entre ambos tableros.
 import { useState, useEffect, useRef } from "react";
-import { MapPin, Maximize2, Minimize2, ChevronUp, ChevronDown, Target } from "lucide-react";
+import { MapPin, Maximize2, Minimize2, ChevronUp, ChevronDown, ChevronLeft, Target } from "lucide-react";
 import { COLORS } from "./theme.js";
 
 // --- Formato ----------------------------------------------------------------
@@ -31,16 +31,31 @@ export function todayStamp() {
 // Rango de fechas del tablero (dropdown en la vista maximizada).
 export const RANGE_OPTIONS = [
   { key: "today", label: "Hoy" },
+  { key: "yesterday", label: "Ayer" },
   { key: "week", label: "Esta semana" },
+  { key: "last_week", label: "La semana pasada" },
   { key: "month", label: "Este mes" },
+  { key: "last_month", label: "El mes pasado" },
   { key: "year", label: "Este año" },
+  { key: "last_year", label: "El año pasado" },
 ];
 export const RANGE_LABELS = Object.fromEntries(RANGE_OPTIONS.map((r) => [r.key, r.label]));
+
+// Los 32 estados de México (31 + CDMX), para el filtro del tablero — se
+// listan todos aunque el rango actual no tenga actividad en alguno de ellos.
+export const MEXICO_ESTADOS = [
+  "Aguascalientes", "Baja California", "Baja California Sur", "Campeche",
+  "Chiapas", "Chihuahua", "Ciudad de México", "Coahuila", "Colima", "Durango",
+  "Estado de México", "Guanajuato", "Guerrero", "Hidalgo", "Jalisco",
+  "Michoacán", "Morelos", "Nayarit", "Nuevo León", "Oaxaca", "Puebla",
+  "Querétaro", "Quintana Roo", "San Luis Potosí", "Sinaloa", "Sonora",
+  "Tabasco", "Tamaulipas", "Tlaxcala", "Veracruz", "Yucatán", "Zacatecas",
+];
 
 // Color del marcador/estado según ventas: verde si vendió, ámbar si está activo
 // pero aún sin ventas.
 export function salesColor(p) {
-  return p.rollos + p.cubetas > 0 ? COLORS.success : COLORS.accent;
+  return p.rollos + p.cubetas + p.galones > 0 ? COLORS.success : COLORS.accent;
 }
 
 // Fondo de textura de marca (igual que en la app del promotor).
@@ -126,7 +141,7 @@ export function NationalMap({ promoters, onSelect }) {
       const popup = `<div style="font-family:Inter,system-ui;min-width:150px">
         <div style="font-weight:700;margin-bottom:2px">${p.name}</div>
         <div style="color:#666;font-size:12px;margin-bottom:6px">${p.estado || "Sin estado"} · ${p.status === "in" ? "En tienda" : "Cerró visitas"}</div>
-        <div style="font-size:12px">Rollos: <b>${fmtNum(p.rollos)}</b> · Cubetas: <b>${fmtNum(p.cubetas)}</b></div>
+        <div style="font-size:12px">Rollos: <b>${fmtNum(p.rollos)}</b> · Cubetas: <b>${fmtNum(p.cubetas)}</b> · Galones: <b>${fmtNum(p.galones)}</b></div>
         <div style="font-size:12px;margin-top:2px">Vendido: <b>${fmtMoney(p.money)}</b></div>
       </div>`;
       const marker = L.marker([p.lat, p.lng], { icon }).bindPopup(popup).addTo(layer);
@@ -188,15 +203,27 @@ export function CountBox({ label, value }) {
   );
 }
 
-// KPI de la tira superior.
-export function Kpi({ icon: Icon, label, value, accent }) {
+// KPI de la tira superior. `tooltip` (opcional) se muestra al hacer hover
+// (title nativo del navegador) explicando qué mide el indicador. `onClick`
+// (opcional) lo vuelve interactivo: al hacer clic filtra el listado/mapa por
+// lo que representa ese KPI (ver `kpiFilter` en ManagerDashboard); `active`
+// resalta el KPI cuando su filtro es el que está aplicado ahora mismo.
+export function Kpi({ icon: Icon, label, value, accent, tooltip, onClick, active }) {
   return (
-    <div style={{ flex: "1 0 auto", minWidth: 128, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "10px 12px" }}>
+    <div
+      onClick={onClick}
+      title={tooltip}
+      style={{
+        flex: "1 0 auto", minWidth: 128, background: active ? COLORS.accentSoft : COLORS.surface,
+        border: `1px solid ${active ? COLORS.accent : COLORS.border}`, borderRadius: 12, padding: "10px 12px",
+        cursor: onClick ? "pointer" : "default", transition: "background .15s ease, border-color .15s ease",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-        <Icon size={13} color={accent ? COLORS.accentText : COLORS.textMuted} />
+        <Icon size={13} color={accent || active ? COLORS.accentText : COLORS.textMuted} />
         <span style={{ fontSize: 10, letterSpacing: "0.06em", color: COLORS.textMuted, fontWeight: 600, textTransform: "uppercase" }}>{label}</span>
       </div>
-      <div style={{ fontSize: 18, fontWeight: 800, color: accent ? COLORS.accentText : COLORS.text, fontFamily: "JetBrains Mono", lineHeight: 1.1 }}>{value}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: accent || active ? COLORS.accentText : COLORS.text, fontFamily: "JetBrains Mono", lineHeight: 1.1 }}>{value}</div>
     </div>
   );
 }
@@ -242,7 +269,7 @@ export function PromoterRow({ p, onClick, onEditGoal }) {
         <div style={{ width: 38, height: 38, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>
           {initials}
         </div>
-        <span style={{ position: "absolute", right: -1, bottom: -1, width: 12, height: 12, borderRadius: "50%", background: color, border: `2px solid ${COLORS.surface}` }} title={p.rollos + p.cubetas > 0 ? "Con ventas" : "Sin ventas"} />
+        <span style={{ position: "absolute", right: -1, bottom: -1, width: 12, height: 12, borderRadius: "50%", background: color, border: `2px solid ${COLORS.surface}` }} title={p.rollos + p.cubetas + p.galones > 0 ? "Con ventas" : "Sin ventas"} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -263,9 +290,10 @@ export function PromoterRow({ p, onClick, onEditGoal }) {
         <div style={{ fontSize: 13, fontWeight: 800, color: COLORS.accentText, fontFamily: "JetBrains Mono", marginTop: 2 }}>{fmtMoney(p.money)}</div>
         <GoalBar goal={p.goal} />
       </div>
-      <div style={{ display: "flex", gap: 6, width: 118, flexShrink: 0 }}>
+      <div style={{ display: "flex", gap: 6, width: 174, flexShrink: 0 }}>
         <CountBox label="Rollos" value={p.rollos} />
         <CountBox label="Cubetas" value={p.cubetas} />
+        <CountBox label="Galones" value={p.galones} />
       </div>
     </div>
   );
@@ -295,7 +323,7 @@ export function EditGoalModal({ promoter, onSave, onClose, saving }) {
           <Target size={16} color={COLORS.accentText} />
           <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>Meta mensual</span>
         </div>
-        <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "4px 0 14px" }}>{promoter.name} · unidades (rollos + cubetas) en el mes.</p>
+        <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "4px 0 14px" }}>{promoter.name} · unidades (rollos + cubetas + galones) en el mes.</p>
         <input
           type="number"
           min="1"
@@ -325,7 +353,7 @@ export function EditGoalModal({ promoter, onSave, onClose, saving }) {
 }
 
 // --- Exportación CSV / Excel -------------------------------------------------
-export const EXPORT_HEADERS = ["ID", "Promotor", "Estado", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Dinero"];
+export const EXPORT_HEADERS = ["ID", "Promotor", "Estado", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Galones", "Dinero"];
 
 export function buildExportRows(promoters) {
   return promoters.flatMap((p) =>
@@ -339,6 +367,7 @@ export function buildExportRows(promoters) {
       salida: fmtDateTime(v.checkOutTime),
       rollos: v.rollos,
       cubetas: v.cubetas,
+      galones: v.galones,
       dinero: v.money,
     }))
   );
@@ -363,7 +392,7 @@ export function downloadCsv(rows, filename) {
   };
   const lines = [EXPORT_HEADERS.join(",")];
   for (const r of rows) {
-    lines.push([r.id, r.promotor, r.estado, r.tienda, r.dia, r.entrada, r.salida, r.rollos, r.cubetas, r.dinero].map(escape).join(","));
+    lines.push([r.id, r.promotor, r.estado, r.tienda, r.dia, r.entrada, r.salida, r.rollos, r.cubetas, r.galones, r.dinero].map(escape).join(","));
   }
   // BOM al inicio: para que Excel detecte UTF-8 y no rompa los acentos/ñ.
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
@@ -377,7 +406,7 @@ export async function downloadXlsx(rows, filename) {
   const XLSX = await import("xlsx");
   const data = rows.map((r) => ({
     ID: r.id, Promotor: r.promotor, Estado: r.estado, Tienda: r.tienda, Día: r.dia,
-    Entrada: r.entrada, Salida: r.salida, Rollos: r.rollos, Cubetas: r.cubetas, Dinero: r.dinero,
+    Entrada: r.entrada, Salida: r.salida, Rollos: r.rollos, Cubetas: r.cubetas, Galones: r.galones, Dinero: r.dinero,
   }));
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
@@ -389,6 +418,30 @@ export async function downloadXlsx(rows, filename) {
 export function PanelHeader({ isDesktop, panelMode, count, total, onToggleCollapse, onToggleMax, title = "Promotores activos", icon: Icon }) {
   const isCollapsed = panelMode === "collapsed";
   const isMax = panelMode === "max";
+
+  // Colapsado en escritorio: el panel se desliza fuera de la pantalla y solo
+  // deja una franja de 46px visible (ver `panelStyle` en el tablero). La
+  // cabecera normal (título a la izquierda, botones a la derecha en una fila
+  // de 400px) queda con sus botones fuera de esa franja — inalcanzable. Esta
+  // variante compacta, en columna, sí cabe dentro de los 46px visibles.
+  if (isDesktop && isCollapsed) {
+    return (
+      <div style={{ width: 46, boxSizing: "border-box", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "14px 0", flexShrink: 0 }}>
+        <button
+          onClick={onToggleCollapse}
+          title="Mostrar listado"
+          style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+        >
+          <ChevronLeft size={16} />
+        </button>
+        {Icon && <Icon size={16} color={COLORS.accentText} />}
+        <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.accentText, background: COLORS.accentSoft, borderRadius: 999, padding: "2px 7px", writingMode: "vertical-rl" }}>
+          {count}{count !== total ? `/${total}` : ""}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderBottom: isCollapsed ? "none" : `1px solid ${COLORS.border}`, flexShrink: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>

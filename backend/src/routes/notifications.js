@@ -30,7 +30,7 @@ router.get("/", async (req, res) => {
       const today = await getManagerSummary("today");
       insight = {
         label: "Top 5 vendedores de hoy",
-        top: today.promoters.slice(0, 5).map((p) => ({ id: p.id, name: p.name, money: p.money, units: p.rollos + p.cubetas })),
+        top: today.promoters.slice(0, 5).map((p) => ({ id: p.id, name: p.name, money: p.money, units: p.rollos + p.cubetas + p.galones })),
       };
     }
 

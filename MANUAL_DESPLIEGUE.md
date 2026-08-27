@@ -79,6 +79,15 @@ receta segura y reversible (usada varias veces en este proyecto):
 (`backend/scripts/_sheetlib.mjs` tiene `readPromoters()` para leer/escribir esa
 columna por su nombre real de fila, sin asumir posiciones.)
 
+> ⚠️ El objeto que devuelve `readPromoters()` trae el hash en el campo
+> **`passwordCell`**, no `password`. Si escribes un script ad hoc para el
+> paso 1 (leer y guardar aparte) y usas el nombre de campo equivocado, vas a
+> "guardar" `undefined` y sobrescribir el hash real **sin poder recuperarlo**
+> (bcrypt no es reversible) — pasó una vez en este proyecto. Antes de
+> sobrescribir cualquier celda de contraseña, confirma que lo que guardaste
+> aparte es un hash bcrypt real (empieza con `$2a$`/`$2b$`/`$2y$`, ver
+> `isBcryptHash()` en `_sheetlib.mjs`), no `undefined`.
+
 ### 4. Probar el GPS en tu celular (HTTPS)
 
 Los navegadores móviles **solo dan ubicación en contextos seguros**
@@ -144,7 +153,13 @@ separado); los datos de un servidor NO se mezclan con los del otro nunca solos.
 2. Render detecta el push a `main` (tiene `autoDeploy: true`, ver `render.yaml`)
    y arranca el deploy del servidor final **solo**, sin tocar nada más.
 3. Verificar en el dashboard de Render → servicio final → **Events/Deploys**
-   que el deploy terminó bien (revisar logs si `prisma db push` falla).
+   que el deploy terminó bien (revisar logs si `prisma db push` falla). Si el
+   merge tocó `schema.prisma` (modelo o columna nueva), confirmar en los logs
+   la línea `Your database is now in sync with your Prisma schema` — si el
+   servicio llevaba tiempo sin re-desplegar código que tocara el schema, es
+   fácil que le falte una tabla/columna nueva sin que nada avise (pasó con
+   `CompetitionReport` en el servidor de pruebas: el código desplegado era de
+   antes de agregar Competencia).
 4. Si el servidor final tiene el auto-deploy desactivado, alguien con acceso
    tiene que entrar y usar **Manual Deploy → Deploy latest commit** después
    del merge.
@@ -228,3 +243,27 @@ adelante se necesita que llegue exactamente, por ejemplo, cada lunes 8am:
   **Starter** (de pago).
 - La Postgres del plan free **expira a los ~30 días** — para el servidor
   final (producción real), usar un plan de Postgres de pago.
+
+---
+
+## Backup diario del Google Sheet ("BBDD Promotores")
+
+**No vive en Render ni en el backend** — es un **Google Apps Script**
+vinculado directamente al Sheet (Extensiones → Apps Script), con un trigger
+de tiempo diario. Se eligió así a propósito: corre dentro de la
+infraestructura de Google (gratis, no depende de que el backend esté
+despierto, no necesita un Cron Job nuevo de Render).
+
+- Todos los días entre **8pm y 9pm hora de México**, copia el Sheet completo
+  a la carpeta de Drive **"Backup"** con el nombre `BBDD Promotores - YYYY-MM-DD`.
+- El script evita duplicar si el trigger llegara a dispararse dos veces el
+  mismo día (revisa si ya existe un archivo con ese nombre en la carpeta
+  antes de copiar).
+- Zona horaria del trigger: configurada en el propio proyecto de Apps Script
+  (⚙️ Configuración del proyecto → `América/Ciudad de México`) — Apps
+  Script interpreta `atHour(20)` según esa zona, no UTC.
+- Para revisar o modificar el trigger: dentro del Sheet, Extensiones → Apps
+  Script → ícono de reloj ⏰ **Triggers** en el menú lateral.
+- No hay retención/limpieza automática de backups viejos — se acumulan en la
+  carpeta "Backup" indefinidamente; si eso se vuelve un problema, agregar esa
+  lógica al mismo script (borrar archivos con más de N días).

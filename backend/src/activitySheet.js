@@ -17,8 +17,10 @@
 // Las columnas se leen por POSICIÓN, no por el texto del encabezado: deben
 // coincidir exactamente con el orden que escribe appendVisitRow en sheets.js
 // (registrado_en, id_promotor, nombre, tienda, hora_entrada, hora_salida,
-// rollos, cubetas). Los encabezados visibles en el Sheet pueden decir otra
-// cosa (quedaron de un diseño anterior); no se usan para parsear.
+// rollos, cubetas, galones). Los encabezados visibles en el Sheet pueden decir
+// otra cosa (quedaron de un diseño anterior); no se usan para parsear. Las
+// filas escritas ANTES de agregar "galones" simplemente no tienen esa novena
+// columna — Number(undefined) da 0, así que se leen igual sin romperse.
 import { existsSync, readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { config } from "./config.js";
@@ -68,7 +70,7 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
   const sheets = await getClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.sheets.spreadsheetId,
-    range: `${config.sheets.actividadTab}!A1:H20000`,
+    range: `${config.sheets.actividadTab}!A1:I20000`,
   });
   const rows = res.data.values ?? [];
 
@@ -85,7 +87,7 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
   const out = [];
   // Fila 0 es el encabezado; los datos empiezan en la fila 1.
   for (let r = 1; r < rows.length; r++) {
-    const [registradoEn, promoterId, promoterName, storeName, horaEntrada, horaSalida, rollosRaw, cubetasRaw] = rows[r] || [];
+    const [registradoEn, promoterId, promoterName, storeName, horaEntrada, horaSalida, rollosRaw, cubetasRaw, galonesRaw] = rows[r] || [];
     if (!promoterId || !storeName) continue; // fila vacía/incompleta
 
     const checkInTime = horaEntrada || registradoEn || null;
@@ -108,6 +110,7 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
       status: "checked-out",
       rollos: Number(rollosRaw) || 0,
       cubetas: Number(cubetasRaw) || 0,
+      galones: Number(galonesRaw) || 0,
       checkInTime,
       checkOutTime: horaSalida || null,
     });

@@ -116,10 +116,10 @@ router.post("/:storeId/check-in", async (req, res) => {
   }
 });
 
-// POST /api/visits/:storeId/check-out  { coords, rollos, cubetas }
+// POST /api/visits/:storeId/check-out  { coords, rollos, cubetas, galones }
 router.post("/:storeId/check-out", async (req, res) => {
   try {
-    const { coords, rollos, cubetas } = req.body ?? {};
+    const { coords, rollos, cubetas, galones } = req.body ?? {};
     const { distance } = await assertInRange(req.promoter.id, req.params.storeId, coords);
 
     const existing = await getVisit(req.promoter.id, req.params.storeId);
@@ -133,6 +133,7 @@ router.post("/:storeId/check-out", async (req, res) => {
       checkOutDistance: distance,
       rollos: Math.max(0, Number(rollos) || 0),
       cubetas: Math.max(0, Number(cubetas) || 0),
+      galones: Math.max(0, Number(galones) || 0),
     });
 
     // Visita completada → agrega una fila al Google Sheet del administrador.

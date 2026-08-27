@@ -39,7 +39,7 @@ Promotor / Supervisor / Gerente-Admin
 
 | Rol | Pantalla | Ve |
 |---|---|---|
-| `promotor` | `PromotoresApp.jsx` | Sus tiendas cercanas, check-in/out con foto, su meta de ventas del mes, reporta competencia, su perfil |
+| `promotor` | `PromotoresApp.jsx` | Sus tiendas cercanas, check-in/out con foto (rollos/cubetas/galones), su meta de ventas del mes, reporta competencia, su perfil, recuperar su contraseña |
 | `supervisor` | `SupervisorDashboard.jsx` | Mapa + resumen **solo de SUS promotores** (los que tienen su nombre en la columna SUPERVISOR de la pestaña Promotores) |
 | `gerente` / `admin` | `ManagerDashboard.jsx` | Mapa + resumen **nacional**, puede fijar la meta de cualquier promotor, exporta CSV/Excel |
 
@@ -62,7 +62,11 @@ APP-PROMOTORES/
 │  │                              # (mapa Leaflet, gráficas SVG, KPI, fila de
 │  │                              # promotor, exportación CSV/Excel, EditGoalModal)
 │  ├─ NotificationBell.jsx       # Campana de notificaciones (admin/gerente/supervisor)
-│  ├─ PromoterProfile.jsx        # Modal de perfil/historial de un promotor
+│  ├─ PromoterProfile.jsx        # Modal de perfil de un promotor: overview + pantalla
+│  │                              # de historial (detrás de un menú), agrupado por día,
+│  │                              # con reporte de "comportamiento extraño" por visita
+│  ├─ CompetenciaPanel.jsx       # Modal de revisión de reportes de Competencia
+│  │                              # (admin/gerente ve todos; supervisor, solo su equipo)
 │  ├─ OnboardingTour.jsx         # Guía de novedades por rol (ver más abajo)
 │  ├─ theme.js                   # Paleta de marca Protexa (compartida por todo)
 │  ├─ auth/AuthProvider.jsx      # Sesión (useAuth), llama a /api/auth/session
@@ -134,11 +138,11 @@ Todo vive en **un solo documento** ("BBDD Promotores"), con estas pestañas:
 | **Promotores** | ID, nombre, ubicación, supervisor, contraseña (hash) de cada promotor | Login de promotores (`promotersSheet.js`); todos los tableros leen aquí el nombre de supervisor de cada promotor |
 | **Tiendas** | Catálogo global de tiendas (num, nombre, lat, lng, **estado**) | `storesSheet.js`, sincroniza a la BD local con `STORES_SOURCE=sheet` |
 | **Usuarios** | ID, nombre, rol (`admin`\|`gerente`\|`supervisor`), contraseña (hash) | Login de administración (`usersSheet.js`) — **nunca** promotores de campo |
-| **Metas** | Tipo (`promotor`\|`tienda`), ID, nombre, meta mensual en **unidades** (rollos+cubetas) | `goalsSheet.js` — el botón "Meta" del tablero de admin **escribe** aquí |
-| **Notificaciones** | Registro de check-in, meta de promotor/tienda alcanzada | `notificationsSheet.js` — se escribe sola desde el backend, nadie la edita a mano |
-| **Competencia** | Fila-resumen (fecha, promotor, marca, descripción, nº de fotos) de cada reporte | `competitionSheet.js` — **las fotos NO están aquí**, viven en `CompetitionReport` (base de datos) |
-| **Actividad Diaria** | Auditoría de cada check-out (la escribe `sheets.js`) | Solo lectura en desarrollo local (`VISITS_SOURCE=sheet`); en producción el resumen del gerente usa la base de datos real, no esta pestaña |
-| **Retroalimentacion** | Reportes de "algo no funciona" desde la app | `sheets.js` |
+| **Metas** | Tipo (`promotor`\|`tienda`), ID, nombre, meta mensual en **unidades** (rollos+cubetas+galones) | `goalsSheet.js` — el botón "Meta" del tablero de admin **escribe** aquí |
+| **Notificaciones** | Registro de check-in, meta de promotor/tienda alcanzada, solicitud de recuperación de contraseña, reporte semanal | `notificationsSheet.js` — se escribe sola desde el backend, nadie la edita a mano |
+| **Competencia** | Fila-resumen (fecha, promotor, marca, descripción, nº de fotos) de cada reporte | `competitionSheet.js` **escribe** aquí; el panel de revisión (`CompetenciaPanel.jsx`) **lee** de la base de datos, no de esta pestaña — las fotos NO están aquí, viven en `CompetitionReport` |
+| **Actividad Diaria** | Auditoría de cada check-out: entrada, salida, rollos, cubetas, **galones** (la escribe `sheets.js`) | Solo lectura en desarrollo local (`VISITS_SOURCE=sheet`); en producción el resumen del gerente usa la base de datos real, no esta pestaña |
+| **Retroalimentacion** | Reportes de "algo no funciona" desde la app del promotor **y** reportes de "comportamiento extraño" que admin/gerente/supervisor levantan desde el historial de un promotor (mismo formato, distinto `enviado_por`) | `sheets.js` (`appendFeedbackRow`) |
 
 Cómo se autentica el backend: un **Service Account** de Google Cloud, con el
 documento compartido con su `client_email` como editor. Ver
@@ -147,8 +151,8 @@ documento compartido con su `client_email` como editor. Ver
 ## Base de datos (Prisma)
 
 Modelos en `backend/prisma/schema.prisma`: `Promoter`, `Store`, `VisitRecord`
-(con la foto del check-in en Base64), `CompetitionReport` (con sus fotos en
-Base64, JSON-array). Motor:
+(rollos, cubetas, **galones**, con la foto del check-in en Base64),
+`CompetitionReport` (con sus fotos en Base64, JSON-array). Motor:
 
 - **Local:** SQLite (`backend/prisma/dev.db`).
 - **Render:** PostgreSQL (gestionado por Render, ver `render.yaml`).
@@ -177,9 +181,9 @@ npx prisma studio        # explorar los datos
 
 ## Metas de venta
 
-Mensuales, en **unidades** (rollos + cubetas), no en dinero (decisión de
-producto). Sin fila en "Metas" = sin meta asignada (no se exige nada, no se
-generan notificaciones).
+Mensuales, en **unidades** (rollos + cubetas + galones), no en dinero
+(decisión de producto). Sin fila en "Metas" = sin meta asignada (no se exige
+nada, no se generan notificaciones).
 
 - **Ver:** todos los tableros calculan el avance del mes desde la base de
   datos real (`db.js` → `attachGoalProgress` / `getMyGoalProgress`).
@@ -194,14 +198,18 @@ generan notificaciones).
 ## Notificaciones
 
 Centro **dentro de la app** (campana, se actualiza sola cada 30s) — no hay push
-real al sistema operativo. Tres tipos, guardados en la pestaña "Notificaciones":
+real al sistema operativo. Cinco tipos, guardados en la pestaña "Notificaciones":
 
 1. **`checkin`** — un promotor hizo check-in → aviso a **su supervisor** (con
    tienda y nombre).
 2. **`promoter_goal`** — un promotor alcanzó su meta del mes → aviso a **su
    supervisor** (una sola vez por mes, idempotente).
 3. **`store_goal`** — una tienda alcanzó su meta del mes → aviso a **admin**.
-4. **`weekly_report`** — resumen semanal de KPIs, uno para admin y uno por
+4. **`password_recovery`** — alguien pidió recuperar su cuenta desde el login
+   → aviso a su supervisor (o a "admin" si es un promotor sin supervisor, o
+   si quien la pidió es admin/gerente/supervisor). No resetea nada por sí
+   sola (ver la sección de arriba).
+5. **`weekly_report`** — resumen semanal de KPIs, uno para admin y uno por
    cada supervisor (con su equipo). Reutiliza `getManagerSummary("week")`, sin
    agregación nueva. **Sin cron/worker**: se dispara "de paso" la próxima vez
    que alguien abre la campana después de cumplirse una semana desde el
@@ -215,12 +223,40 @@ real al sistema operativo. Tres tipos, guardados en la pestaña "Notificaciones"
 Admin/gerente además ven un **insight en vivo** (Top 5 vendedores del día), que
 **no se guarda**: se recalcula cada vez que se abre la campana.
 
+## Tablero del gerente / supervisor (mapa + KPIs + panel)
+
+- **Rango de fechas** (`RANGE_OPTIONS` en `dashboardShared.jsx`, resuelto por
+  `businessDay.js#resolveRange`): hoy, ayer, esta semana, la semana pasada,
+  este mes, el mes pasado, este año, el año pasado — todos en hora de México.
+- **Filtro de estado**: lista siempre los **32 estados de México**
+  (`MEXICO_ESTADOS` en `dashboardShared.jsx`), no solo los que tengan
+  actividad en el rango — depende de que la pestaña "Tiendas" tenga la
+  columna ESTADO capturada; si no, todo cae en "Sin estado".
+- **KPIs interactivos**: cada tarjeta (`Kpi`) tiene un `tooltip` (hover) que
+  explica qué mide, y un `onClick` que aplica el mismo filtro de segmento
+  (`todos`\|`con`\|`sin`\|`in`\|`meta`) que usan los botones de abajo — como
+  el mapa y el listado ya reaccionan a ese filtro, hacer clic en "Sin ventas"
+  resalta en el mapa justo a esos promotores.
+- **Panel colapsado (escritorio)**: al colapsar, el panel se desliza dejando
+  solo una franja de 46px visible. `PanelHeader` tiene una variante compacta
+  para ese estado (ancho fijo de 46px, botón con flecha izquierda) — la
+  cabecera normal NO cabe ahí (sus botones quedan fuera de la franja), así
+  que si se toca el layout del panel colapsado hay que respetar ese ancho.
+
 ## Competencia
 
 El promotor reporta marca/competidor + descripción + hasta 5 fotos desde la
 pantalla "Competencia". El reporte completo (con fotos) se guarda en
 `CompetitionReport`; el Sheet solo recibe la fila-resumen. Ver
 `backend/src/routes/competition.js`.
+
+**Panel de revisión** (`CompetenciaPanel.jsx`, botón de bandera 🚩 en el
+header del tablero): lista los reportes (más recientes primero) con las
+fotos como miniaturas (clic para verlas en grande). Admin/gerente ven todos
+(`GET /api/manager/competencia`); supervisor solo los de su equipo
+(`GET /api/supervisor/competencia`, filtrado por `db.js#getCompetitionReports`).
+Es de solo lectura: no hay un estado de "revisado" (ver pendientes en
+[OBJETIVOS.md](OBJETIVOS.md)).
 
 ## Onboarding
 
@@ -231,15 +267,46 @@ vuelvan a ver tras agregar una feature nueva, sube la versión (`v1` → `v2`) e
 la constante de cada pantalla. Cada pantalla tiene un botón de ayuda ("?") para
 reabrirla manualmente en cualquier momento.
 
-## Perfil de promotor (historial)
+## Perfil de promotor (historial + reporte de comportamiento)
 
-Modal (`PromoterProfile.jsx`) con el historial de check-in/check-out, su
-supervisor y sus tiendas más frecuentes. Lo abre admin/gerente (cualquier
-promotor), un supervisor (**solo los suyos**) o **el propio promotor** (solo
-el suyo, en la pestaña "Perfil" de su app — "Mi historial"). Todo validado en
-el servidor por rol (`GET /api/promoters/:id/profile`). Lee siempre la base de
-datos local, nunca el Sheet — en desarrollo local puede aparecer vacío si ese
-promotor nunca inició sesión en este backend.
+Modal (`PromoterProfile.jsx`) con dos pantallas:
+
+1. **Overview** (por defecto): nombre, supervisor, tiendas más frecuentes, y
+   un botón-menú "Historial de check-in / check-out →" con el total de
+   visitas.
+2. **Historial** (se abre al hacer clic en ese menú, con flecha ← para
+   volver): las visitas **agrupadas por día**. Cada visita tiene un ícono de
+   alerta ⚠️ que abre un mini-formulario inline para reportar un
+   **comportamiento extraño** puntual (ej. checkout casi inmediato al
+   check-in, cero ventas en una tienda donde normalmente sí vende).
+
+Ese reporte se guarda con el **mismo formato y en la misma pestaña** que la
+retroalimentación de los promotores (`POST /api/promoters/:id/report-behavior`
+→ `appendFeedbackRow`), solo que `enviado_por` es la sesión de quien lo
+levanta (admin/gerente/supervisor), no la del promotor. Un promotor no puede
+usar esta vía para reportarse a sí mismo.
+
+Lo abre admin/gerente (cualquier promotor), un supervisor (**solo los
+suyos**, y solo puede reportar comportamiento de los suyos) o **el propio
+promotor** (solo su perfil, solo para ver — no ve el ícono de reporte, en la
+pestaña "Perfil" de su app, "Mi historial"). Todo validado en el servidor por
+rol (`GET /api/promoters/:id/profile`, `POST .../report-behavior`). El
+historial lee siempre la base de datos local, nunca el Sheet — en desarrollo
+local puede aparecer vacío si ese promotor nunca hizo check-in/out en este
+backend.
+
+## Recuperación de contraseña (sin resetearla sola)
+
+En el login: ícono de ojo 👁 para mostrar/ocultar la contraseña, y un link
+discreto "recuperar mi cuenta" debajo del botón de iniciar sesión. Abre una
+pantalla que solo pide el ID — al enviarlo (`POST /api/auth/recover-request`,
+**pública**, sin sesión) el backend **no resetea nada**, solo **avisa**: si
+el ID es de un promotor, notifica a su supervisor (o a "admin" si no tiene
+uno asignado); si es de un admin/gerente/supervisor (pestaña "Usuarios"),
+notifica a "admin". La respuesta al cliente es **idéntica exista o no el ID**
+(mismo criterio anti-enumeración que `authenticate()` en `auth.js`). El
+reseteo real sigue siendo manual (`backend/scripts/reset-password.mjs`) — no
+hay reseteo self-service todavía.
 
 ## Recordatorio de check-out
 
@@ -254,21 +321,25 @@ Rutas bajo `VITE_API_BASE` (por defecto `/api`, mismo origen).
 | Método | Ruta | Rol | Descripción |
 |--------|------|-----|-------------|
 | POST | `/login` | público | `{ promoterId, password }`. bcrypt + cookie de sesión HttpOnly. |
+| POST | `/auth/recover-request` | público | `{ promoterId }`. No resetea nada: avisa al supervisor (o admin) que hace falta una contraseña nueva. Misma respuesta exista o no el ID. |
 | GET | `/auth/session` | cualquiera con sesión | `{ id, name, role, ...(location/supervisor si es promotor) }` |
 | POST | `/auth/logout` | cualquiera con sesión | Invalida la sesión |
 | GET | `/stores?lat=&lng=` | promotor | Tiendas dentro de ~2 km (Haversine) |
 | GET | `/stores/all` | promotor | Catálogo completo (para el mapa de Inicio) |
 | POST | `/visits/:storeId/check-in` | promotor | `{ coords, photo }`. Foto obligatoria. |
-| POST | `/visits/:storeId/check-out` | promotor | `{ coords, rollos, cubetas }`. Escribe la fila en Actividad Diaria + revisa metas. |
+| POST | `/visits/:storeId/check-out` | promotor | `{ coords, rollos, cubetas, galones }`. Escribe la fila en Actividad Diaria + revisa metas. |
 | GET | `/visits/today` | promotor | Visitas de hoy del promotor logueado |
 | GET | `/visits/my-goal` | promotor | Su meta mensual y avance, o `null` |
 | POST | `/feedback` | promotor | Reporte de "algo no funciona" |
 | POST | `/competition` | promotor | `{ marca, descripcion, fotos? }` (hasta 5) |
-| GET | `/manager/summary?range=` | gerente/admin | `today\|week\|month\|year`. Resumen nacional. |
+| GET | `/manager/summary?range=` | gerente/admin | `today\|yesterday\|week\|last_week\|month\|last_month\|year\|last_year`. Resumen nacional. |
 | PUT | `/manager/promoter/:id/goal` | gerente/admin | `{ meta, nombre? }`. Fija la meta mensual. |
+| GET | `/manager/competencia` | gerente/admin | Reportes de Competencia (todos), más recientes primero. |
 | GET | `/supervisor/summary?range=` | supervisor | Mismo resumen, acotado a sus promotores |
+| GET | `/supervisor/competencia` | supervisor | Mismos reportes de Competencia, acotados a su equipo |
 | GET | `/notifications` | admin/gerente/supervisor | Las suyas + insight Top 5 (solo admin/gerente) |
 | GET | `/promoters/:id/profile` | cualquiera | Historial (promotor: solo el suyo; supervisor: solo los suyos) |
+| POST | `/promoters/:id/report-behavior` | admin/gerente/supervisor | `{ day, storeName, descripcion }`. Reporta comportamiento extraño sobre una visita; se guarda como retroalimentación. |
 | GET | `/sheets/status` | cualquiera con sesión | Diagnóstico de la conexión a Google Sheets |
 | GET | `/health` | público | Health check de Render |
 

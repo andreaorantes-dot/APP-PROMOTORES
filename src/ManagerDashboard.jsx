@@ -17,18 +17,19 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   LogOut, RefreshCw, Search, HelpCircle,
-  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell,
+  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell, Flag,
 } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { COLORS, detectScheme, applyScheme } from "./theme.js";
 import {
-  fmtMoney, fmtNum, todayStamp, RANGE_OPTIONS, RANGE_LABELS,
+  fmtMoney, fmtNum, todayStamp, RANGE_OPTIONS, RANGE_LABELS, MEXICO_ESTADOS,
   bgTexture, Brand, NationalMap, BarChart, Kpi, ChartCard, PromoterRow, PanelHeader, EditGoalModal,
   buildExportRows, downloadCsv, downloadXlsx,
 } from "./dashboardShared.jsx";
 import NotificationBell from "./NotificationBell.jsx";
 import PromoterProfile from "./PromoterProfile.jsx";
+import CompetenciaPanel from "./CompetenciaPanel.jsx";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
 
 // Onboarding del ADMIN/GERENTE — sube la versión cuando se agreguen features.
@@ -91,6 +92,7 @@ export default function ManagerDashboard() {
   const [profileId, setProfileId] = useState(null);
   const [editingGoalFor, setEditingGoalFor] = useState(null); // promotor u null
   const [savingGoal, setSavingGoal] = useState(false);
+  const [showCompetencia, setShowCompetencia] = useState(false);
 
   // Estado del panel: open | collapsed | max
   const [panelMode, setPanelMode] = useState("open");
@@ -138,17 +140,20 @@ export default function ManagerDashboard() {
   }
 
   const promoters = summary?.promoters ?? [];
-  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, money: 0, checkedIn: 0, withoutSales: 0 };
+  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, galones: 0, money: 0, checkedIn: 0, withoutSales: 0 };
   const prices = summary?.prices ?? { rollo: 0, cubeta: 0 };
   const useMoney = totals.money > 0;
 
-  const estados = useMemo(() => (summary?.byEstado ?? []).map((e) => e.estado), [summary]);
+  // Los 32 estados de México siempre completos en el dropdown (no solo los
+  // que tengan actividad en el rango actual).
+  const estados = MEXICO_ESTADOS;
 
   const filtered = useMemo(() => {
     let list = promoters;
     if (estado !== "todos") list = list.filter((p) => (p.estado || "Sin estado") === estado);
-    if (segment === "con") list = list.filter((p) => p.rollos + p.cubetas > 0);
-    else if (segment === "sin") list = list.filter((p) => p.rollos + p.cubetas === 0);
+    if (segment === "con") list = list.filter((p) => p.rollos + p.cubetas + p.galones > 0);
+    else if (segment === "sin") list = list.filter((p) => p.rollos + p.cubetas + p.galones === 0);
+    else if (segment === "in") list = list.filter((p) => p.status === "in");
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       list = list.filter((p) => (p.name || "").toLowerCase().includes(q) || String(p.id).includes(q));
@@ -159,7 +164,7 @@ export default function ManagerDashboard() {
   }, [promoters, estado, segment, query]);
 
   // Datos para gráficas (por dinero si hay precios; si no, por unidades).
-  const metric = (p) => (useMoney ? p.money : p.rollos + p.cubetas);
+  const metric = (p) => (useMoney ? p.money : p.rollos + p.cubetas + p.galones);
   const metricFmt = useMoney ? fmtMoney : fmtNum;
   const topData = useMemo(
     () => [...filtered].sort((a, b) => metric(b) - metric(a)).slice(0, 8).map((p) => ({ label: p.name, value: metric(p) })),
@@ -181,12 +186,14 @@ export default function ManagerDashboard() {
     : [
         { label: "Rollos", value: totals.rollos },
         { label: "Cubetas", value: totals.cubetas },
+        { label: "Galones", value: totals.galones },
       ];
 
   const segments = [
     { key: "todos", label: "Todos" },
     { key: "con", label: "Con ventas" },
     { key: "sin", label: "Sin ventas" },
+    { key: "in", label: "En tienda" },
     { key: "top", label: "Top 5" },
   ];
 
@@ -250,6 +257,13 @@ export default function ManagerDashboard() {
           </button>
           <NotificationBell />
           <button
+            onClick={() => setShowCompetencia(true)}
+            title="Reportes de Competencia"
+            style={{ width: 36, height: 36, borderRadius: 9, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+          >
+            <Flag size={16} />
+          </button>
+          <button
             onClick={() => load()}
             disabled={loading}
             title="Actualizar"
@@ -270,15 +284,51 @@ export default function ManagerDashboard() {
       </div>
       <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
 
-      {/* Tira de KPIs */}
+      {/* Tira de KPIs — hover explica qué mide cada uno; clic filtra el
+          listado y, con eso, resalta en el mapa a los promotores que
+          corresponden (mismo mecanismo que los botones "Con ventas" / "Sin
+          ventas" de abajo, solo que disparado desde el indicador). */}
       <div style={{ display: "flex", gap: 8, padding: "10px 12px", overflowX: "auto", flexShrink: 0, borderBottom: `1px solid ${COLORS.border}` }}>
-        <Kpi icon={DollarSign} label={`Vendido · ${RANGE_LABELS[range]}`} value={fmtMoney(totals.money)} accent />
-        <Kpi icon={TrendingUp} label="Rollos" value={fmtNum(totals.rollos)} />
-        <Kpi icon={TrendingUp} label="Cubetas" value={fmtNum(totals.cubetas)} />
-        <Kpi icon={Users} label="Activos" value={fmtNum(totals.promoters)} />
-        <Kpi icon={MapPin} label="En tienda" value={fmtNum(totals.checkedIn)} />
-        <Kpi icon={Store} label="Tiendas" value={fmtNum(totals.storesVisited)} />
-        <Kpi icon={AlertTriangle} label="Sin ventas" value={fmtNum(totals.withoutSales)} />
+        <Kpi
+          icon={DollarSign} label={`Vendido · ${RANGE_LABELS[range]}`} value={fmtMoney(totals.money)} accent
+          tooltip="Suma en dinero de todas las ventas (rollos + cubetas) registradas en este período."
+          onClick={() => setSegment("con")} active={segment === "con"}
+        />
+        <Kpi
+          icon={TrendingUp} label="Rollos" value={fmtNum(totals.rollos)}
+          tooltip="Total de rollos vendidos por todos los promotores en este período."
+          onClick={() => setSegment("con")} active={segment === "con"}
+        />
+        <Kpi
+          icon={TrendingUp} label="Cubetas" value={fmtNum(totals.cubetas)}
+          tooltip="Total de cubetas vendidas por todos los promotores en este período."
+          onClick={() => setSegment("con")} active={segment === "con"}
+        />
+        <Kpi
+          icon={TrendingUp} label="Galones" value={fmtNum(totals.galones)}
+          tooltip="Total de galones vendidos por todos los promotores en este período."
+          onClick={() => setSegment("con")} active={segment === "con"}
+        />
+        <Kpi
+          icon={Users} label="Activos" value={fmtNum(totals.promoters)}
+          tooltip="Promotores con al menos una visita registrada en este período."
+          onClick={() => setSegment("todos")} active={segment === "todos"}
+        />
+        <Kpi
+          icon={MapPin} label="En tienda" value={fmtNum(totals.checkedIn)}
+          tooltip="Promotores que ya hicieron check-in y siguen sin hacer check-out."
+          onClick={() => setSegment("in")} active={segment === "in"}
+        />
+        <Kpi
+          icon={Store} label="Tiendas" value={fmtNum(totals.storesVisited)}
+          tooltip="Número de tiendas distintas visitadas en este período."
+          onClick={() => setSegment("todos")}
+        />
+        <Kpi
+          icon={AlertTriangle} label="Sin ventas" value={fmtNum(totals.withoutSales)}
+          tooltip="Promotores activos que no han registrado ninguna venta en este período."
+          onClick={() => setSegment("sin")} active={segment === "sin"}
+        />
       </div>
 
       {/* Cuerpo: mapa + panel */}
@@ -424,6 +474,7 @@ export default function ManagerDashboard() {
       </div>
 
       {profileId && <PromoterProfile promoterId={profileId} onClose={() => setProfileId(null)} />}
+      {showCompetencia && <CompetenciaPanel fetcher={api.managerCompetencia} onClose={() => setShowCompetencia(false)} />}
       {editingGoalFor && (
         <EditGoalModal
           promoter={editingGoalFor}

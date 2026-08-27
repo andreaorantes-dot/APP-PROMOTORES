@@ -1,8 +1,12 @@
 // Esquema de datos — App Promotores
-// Motor: PostgreSQL (persistente). El DATABASE_URL viene del entorno:
-// en Render lo provee el servicio de Postgres; en local, tu .env (o "sqlite"
-// para desarrollo local — ese cambio de provider se gestiona con skip-worktree
-// y nunca se sube al repo). El resto del código (queries Prisma) es idéntico.
+// Motor: en los servidores (Render) es PostgreSQL; en local es SQLite
+// (DATABASE_URL="file:./dev.db"). El provider de abajo debe COINCIDIR con el
+// motor real: por eso en local va "sqlite" (cambio gestionado con skip-worktree,
+// no se sube al repo). El resto del código (queries Prisma) es idéntico.
+//
+// NOTA (corrección 22/08/2026): el provider estaba corrupto ("postgresql{}][]"),
+// lo que rompía `prisma db push` / `generate`. Se corrigió a "sqlite" para el
+// entorno local. En los servidores debe ser "postgresql".
 
 generator client {
   provider = "prisma-client-js"
@@ -50,6 +54,7 @@ model VisitRecord {
   checkOutDistance Int?
   rollos           Int       @default(0)
   cubetas          Int       @default(0)
+  galones          Int       @default(0)
   photo            String? // foto de la visita en Base64 (data URL), persistida
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

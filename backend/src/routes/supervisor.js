@@ -5,14 +5,14 @@
 // ---------------------------------------------------------------------------
 import { Router } from "express";
 import { requireAuth, requireRole } from "../auth.js";
-import { getSupervisorSummary } from "../db.js";
+import { getSupervisorSummary, getCompetitionReports } from "../db.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("supervisor"));
 
-const RANGE_KEYS = ["today", "week", "month", "year"];
+const RANGE_KEYS = ["today", "yesterday", "week", "last_week", "month", "last_month", "year", "last_year"];
 
-// GET /api/supervisor/summary?range=today|week|month|year
+// GET /api/supervisor/summary?range=today|yesterday|week|last_week|month|last_month|year|last_year
 router.get("/summary", async (req, res) => {
   try {
     const range = RANGE_KEYS.includes(String(req.query.range)) ? String(req.query.range) : "today";
@@ -21,6 +21,17 @@ router.get("/summary", async (req, res) => {
   } catch (err) {
     console.error("[supervisor/summary]", err);
     return res.status(500).json({ message: "No se pudo generar el resumen" });
+  }
+});
+
+// GET /api/supervisor/competencia — reportes de Competencia, acotados a SU equipo.
+router.get("/competencia", async (req, res) => {
+  try {
+    const reports = await getCompetitionReports({ supervisorId: req.promoter.id });
+    return res.json({ reports });
+  } catch (err) {
+    console.error("[supervisor/competencia]", err);
+    return res.status(500).json({ message: "No se pudieron cargar los reportes de competencia" });
   }
 });
 

@@ -130,6 +130,31 @@ export async function createCompetitionReport(promoterId, { marca, descripcion, 
   return report;
 }
 
+// Reportes de Competencia para el panel del gerente/admin (o de un supervisor,
+// acotado a SU equipo). Más recientes primero. Las fotos se guardan como JSON
+// en la base de datos (ver CompetitionReport.photos) — se devuelven ya
+// parseadas como arreglo.
+export async function getCompetitionReports({ supervisorId, limit = 200 } = {}) {
+  const reports = await prisma.competitionReport.findMany({
+    include: { promoter: true },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  const filtered = supervisorId
+    ? reports.filter((r) => (r.promoter?.supervisor || "").trim().toLowerCase() === supervisorId)
+    : reports;
+  return filtered.map((r) => ({
+    id: r.id,
+    promoterId: r.promoterId,
+    promoterName: r.promoter?.name || r.promoterId,
+    supervisor: r.promoter?.supervisor || null,
+    marca: r.marca,
+    descripcion: r.descripcion,
+    photos: r.photos ? JSON.parse(r.photos) : [],
+    createdAt: r.createdAt,
+  }));
+}
+
 // --- Resumen para el GERENTE -------------------------------------------------
 // Agrega TODAS las visitas de un RANGO de días ("today" | "week" | "month" |
 // "year", por defecto "today") y las agrupa por promotor. Calcula el "dinero
@@ -189,12 +214,12 @@ async function attachGoalProgress(summary) {
       ? await fetchVisitRowsFromSheet(month)
       : await prisma.visitRecord.findMany({
           where: { day: { gte: month.from, lte: month.to } },
-          select: { promoterId: true, rollos: true, cubetas: true },
+          select: { promoterId: true, rollos: true, cubetas: true, galones: true },
         });
 
   const achievedByPromoter = new Map();
   for (const r of monthRows) {
-    achievedByPromoter.set(r.promoterId, (achievedByPromoter.get(r.promoterId) || 0) + (r.rollos || 0) + (r.cubetas || 0));
+    achievedByPromoter.set(r.promoterId, (achievedByPromoter.get(r.promoterId) || 0) + (r.rollos || 0) + (r.cubetas || 0) + (r.galones || 0));
   }
 
   for (const p of summary.promoters) {
@@ -234,9 +259,9 @@ export async function notifyCheckIn(promoterId, storeId) {
 async function monthToDateUnitsForPromoter(promoterId, month = resolveRange("month")) {
   const sum = await prisma.visitRecord.aggregate({
     where: { promoterId, day: { gte: month.from, lte: month.to } },
-    _sum: { rollos: true, cubetas: true },
+    _sum: { rollos: true, cubetas: true, galones: true },
   });
-  return (sum._sum.rollos || 0) + (sum._sum.cubetas || 0);
+  return (sum._sum.rollos || 0) + (sum._sum.cubetas || 0) + (sum._sum.galones || 0);
 }
 
 // Meta y avance del MES del promotor logueado — lo consume su propia app
@@ -284,9 +309,9 @@ export async function checkAndNotifyGoals(promoterId, storeId) {
     if (storeGoal) {
       const sum = await prisma.visitRecord.aggregate({
         where: { storeId, day: { gte: month.from, lte: month.to } },
-        _sum: { rollos: true, cubetas: true },
+        _sum: { rollos: true, cubetas: true, galones: true },
       });
-      const achieved = (sum._sum.rollos || 0) + (sum._sum.cubetas || 0);
+      const achieved = (sum._sum.rollos || 0) + (sum._sum.cubetas || 0) + (sum._sum.galones || 0);
       if (achieved >= storeGoal && !(await hasGoalNotification({ tipo: "store_goal", id: storeId, periodo }))) {
         const store = await getStore(storeId);
         await appendNotification({
@@ -343,6 +368,7 @@ export async function getPromoterProfile(promoterId, limit = 200) {
       checkOutTime: v.checkOutTime,
       rollos: v.rollos,
       cubetas: v.cubetas,
+      galones: v.galones,
     })),
   };
 }

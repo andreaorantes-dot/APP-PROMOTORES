@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
@@ -306,8 +306,8 @@ function GoalBar({ label, actual, meta }) {
 
 // Barra de meta de ventas con gamificación (nivel + mensaje motivacional).
 // `goal` viene de GET /api/visits/my-goal: { target, achieved, reached }
-// (unidades = rollos+cubetas ACUMULADAS EN EL MES, fijadas por el admin desde
-// su tablero) o `null` si todavía no tiene una meta asignada.
+// (unidades = rollos+cubetas+galones ACUMULADOS EN EL MES, fijadas por el
+// admin desde su tablero) o `null` si todavía no tiene una meta asignada.
 function SalesGoals({ goal }) {
   if (!goal) {
     return (
@@ -334,7 +334,7 @@ function SalesGoals({ goal }) {
             <Trophy size={12} /> {level}
           </span>
         </div>
-        <GoalBar label="Rollos + cubetas" actual={goal.achieved} meta={goal.target} />
+        <GoalBar label="Rollos + cubetas + galones" actual={goal.achieved} meta={goal.target} />
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.successSoft, border: `1px solid ${COLORS.success}55`, borderRadius: 12, padding: "10px 12px", marginBottom: 14 }}>
         <Zap size={16} color={COLORS.success} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -391,6 +391,15 @@ export default function PromotoresApp() {
   const [promoterId, setPromoterId] = useState("");
   const [password, setPassword] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Flujo de "recuperar mi cuenta": no resetea nada aquí — solo avisa al
+  // supervisor (o admin) de que hace falta una contraseña nueva.
+  const [authView, setAuthView] = useState("login"); // "login" | "recover"
+  const [recoverId, setRecoverId] = useState("");
+  const [recoverSending, setRecoverSending] = useState(false);
+  const [recoverDone, setRecoverDone] = useState(false);
+  const [recoverError, setRecoverError] = useState("");
 
   const [gpsCoords, setGpsCoords] = useState(null);
   const [gpsAccuracy, setGpsAccuracy] = useState(null);
@@ -410,6 +419,7 @@ export default function PromotoresApp() {
   const MAX_COMP_FOTOS = 5;
   const [rollos, setRollos] = useState(0);
   const [cubetas, setCubetas] = useState(0);
+  const [galones, setGalones] = useState(0);
   const [photo, setPhoto] = useState(null); // foto de check-in (Base64), obligatoria
   const [photoBusy, setPhotoBusy] = useState(false);
   const fileInputRef = useRef(null);
@@ -624,6 +634,7 @@ export default function PromotoresApp() {
     setSelectedStore(storeObj);
     setRollos(0);
     setCubetas(0);
+    setGalones(0);
     setPhoto(null);
     setGpsCoords(null);
     setGpsAccuracy(null);
@@ -717,21 +728,22 @@ export default function PromotoresApp() {
       checkOutDistance: Math.round(distance),
       rollos,
       cubetas,
+      galones,
     };
     try {
       if (!navigator.onLine) {
-        await queueOffline("check-out", { coords, rollos, cubetas }, optimistic);
+        await queueOffline("check-out", { coords, rollos, cubetas, galones }, optimistic);
         setShowSheet(false);
         return;
       }
-      const rec = await api.checkOut(store.id, { coords, rollos, cubetas });
+      const rec = await api.checkOut(store.id, { coords, rollos, cubetas, galones });
       await persistRecords({ ...records, [store.id]: rec });
       setShowSheet(false);
     } catch (e) {
       if (e instanceof ApiError) {
         alert(e.message || "No se pudo registrar la salida.");
       } else {
-        await queueOffline("check-out", { coords, rollos, cubetas }, optimistic);
+        await queueOffline("check-out", { coords, rollos, cubetas, galones }, optimistic);
         setShowSheet(false);
       }
     } finally {
@@ -749,6 +761,27 @@ export default function PromotoresApp() {
     } finally {
       setLoggingIn(false);
     }
+  }
+
+  async function handleRecoverRequest() {
+    if (recoverSending || !recoverId.trim()) return;
+    setRecoverSending(true);
+    setRecoverError("");
+    try {
+      await api.recoverRequest(recoverId.trim());
+      setRecoverDone(true);
+    } catch (e) {
+      setRecoverError(e instanceof ApiError ? e.message : "No hay conexión. Revisa tu internet e intenta de nuevo.");
+    } finally {
+      setRecoverSending(false);
+    }
+  }
+
+  function backToLogin() {
+    setAuthView("login");
+    setRecoverId("");
+    setRecoverDone(false);
+    setRecoverError("");
   }
 
   async function handleLogout() {
@@ -831,49 +864,132 @@ export default function PromotoresApp() {
             </div>
             <span style={{ fontFamily: "Inter", fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>PROMOTORES DE CAMPO</span>
           </div>
-          <h1 style={{ fontFamily: "Space Grotesk", fontSize: 24, fontWeight: 600, color: COLORS.text, margin: "0 0 6px" }}>Registro de visitas</h1>
-          <p style={{ fontSize: 13, color: COLORS.textMuted, margin: "0 0 24px", lineHeight: 1.5 }}>
-            Ingresa tu ID de promotor y contraseña para ver las tiendas cercanas a tu ubicación.
-          </p>
 
-          <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6 }}>ID de promotor</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 16 }}>
-            <User size={16} color={COLORS.textMuted} />
-            <input
-              value={promoterId}
-              onChange={(e) => setPromoterId(e.target.value)}
-              placeholder="90500276"
-              inputMode="numeric"
-              style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontFamily: "JetBrains Mono", fontSize: 16, width: "100%" }}
-            />
-          </div>
+          {authView === "login" ? (
+            <>
+              <h1 style={{ fontFamily: "Space Grotesk", fontSize: 24, fontWeight: 600, color: COLORS.text, margin: "0 0 6px" }}>Registro de visitas</h1>
+              <p style={{ fontSize: 13, color: COLORS.textMuted, margin: "0 0 24px", lineHeight: 1.5 }}>
+                Ingresa tu ID de promotor y contraseña para ver las tiendas cercanas a tu ubicación.
+              </p>
 
-          <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6 }}>Contraseña</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
-            <Lock size={16} color={COLORS.textMuted} />
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-              placeholder="••••••••"
-              style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontFamily: "Inter", fontSize: 16, width: "100%" }}
-            />
-          </div>
+              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6 }}>ID de promotor</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 16 }}>
+                <User size={16} color={COLORS.textMuted} />
+                <input
+                  value={promoterId}
+                  onChange={(e) => setPromoterId(e.target.value)}
+                  placeholder="90500276"
+                  inputMode="numeric"
+                  style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontFamily: "JetBrains Mono", fontSize: 16, width: "100%" }}
+                />
+              </div>
 
-          {authError && <p style={{ color: COLORS.danger, fontSize: 12.5, margin: "6px 0 0" }}>{authError}</p>}
+              <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6 }}>Contraseña</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                <Lock size={16} color={COLORS.textMuted} />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                  placeholder="••••••••"
+                  style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontFamily: "Inter", fontSize: 16, width: "100%" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((s) => !s)}
+                  title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: COLORS.textMuted, display: "flex", flexShrink: 0 }}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
 
-          <button
-            onClick={handleLogin}
-            disabled={loggingIn || !promoterId.trim() || !password}
-            style={{ width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 10, border: "none", background: promoterId.trim() && password ? COLORS.accent : COLORS.surface2, color: promoterId.trim() && password ? COLORS.onAccent : COLORS.textMuted, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: loggingIn || !promoterId.trim() || !password ? "not-allowed" : "pointer" }}
-          >
-            {loggingIn ? "Ingresando…" : "Iniciar sesión"}
-          </button>
+              {authError && <p style={{ color: COLORS.danger, fontSize: 12.5, margin: "6px 0 0" }}>{authError}</p>}
 
-          <p style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 22, lineHeight: 1.6 }}>
-            Tu contraseña se verifica en el servidor (hash bcrypt). La sesión se guarda en una cookie HttpOnly; ningún token queda expuesto en el navegador.
-          </p>
+              <button
+                onClick={handleLogin}
+                disabled={loggingIn || !promoterId.trim() || !password}
+                style={{ width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 10, border: "none", background: promoterId.trim() && password ? COLORS.accent : COLORS.surface2, color: promoterId.trim() && password ? COLORS.onAccent : COLORS.textMuted, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: loggingIn || !promoterId.trim() || !password ? "not-allowed" : "pointer" }}
+              >
+                {loggingIn ? "Ingresando…" : "Iniciar sesión"}
+              </button>
+
+              <div style={{ textAlign: "center", marginTop: 14 }}>
+                <button
+                  type="button"
+                  onClick={() => setAuthView("recover")}
+                  style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: COLORS.textMuted, fontSize: 11.5, textDecoration: "underline", textUnderlineOffset: 2 }}
+                >
+                  recuperar mi cuenta
+                </button>
+              </div>
+
+              <p style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 22, lineHeight: 1.6 }}>
+                Tu contraseña se verifica en el servidor (hash bcrypt). La sesión se guarda en una cookie HttpOnly; ningún token queda expuesto en el navegador.
+              </p>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <KeyRound size={18} color={COLORS.accentText} />
+                <h1 style={{ fontFamily: "Space Grotesk", fontSize: 20, fontWeight: 600, color: COLORS.text, margin: 0 }}>Recuperar mi cuenta</h1>
+              </div>
+
+              {recoverDone ? (
+                <>
+                  <p style={{ fontSize: 13, color: COLORS.textMuted, margin: "10px 0 22px", lineHeight: 1.55 }}>
+                    Si tu ID es válido, tu supervisor ya recibió la solicitud y te asignará una contraseña nueva.
+                  </p>
+                  <button
+                    onClick={backToLogin}
+                    style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: "pointer" }}
+                  >
+                    Volver a iniciar sesión
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p style={{ fontSize: 13, color: COLORS.textMuted, margin: "0 0 22px", lineHeight: 1.55 }}>
+                    Ingresa tu ID de promotor. Le avisaremos a tu supervisor para que te asigne una contraseña nueva.
+                  </p>
+
+                  <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6 }}>ID de promotor</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                    <User size={16} color={COLORS.textMuted} />
+                    <input
+                      value={recoverId}
+                      onChange={(e) => setRecoverId(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && handleRecoverRequest()}
+                      placeholder="90500276"
+                      inputMode="numeric"
+                      style={{ background: "transparent", border: "none", outline: "none", color: COLORS.text, fontFamily: "JetBrains Mono", fontSize: 16, width: "100%" }}
+                    />
+                  </div>
+
+                  {recoverError && <p style={{ color: COLORS.danger, fontSize: 12.5, margin: "6px 0 0" }}>{recoverError}</p>}
+
+                  <button
+                    onClick={handleRecoverRequest}
+                    disabled={recoverSending || !recoverId.trim()}
+                    style={{ width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 10, border: "none", background: recoverId.trim() ? COLORS.accent : COLORS.surface2, color: recoverId.trim() ? COLORS.onAccent : COLORS.textMuted, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: recoverSending || !recoverId.trim() ? "not-allowed" : "pointer" }}
+                  >
+                    {recoverSending ? "Enviando…" : "Enviar solicitud"}
+                  </button>
+
+                  <div style={{ textAlign: "center", marginTop: 14 }}>
+                    <button
+                      type="button"
+                      onClick={backToLogin}
+                      style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: COLORS.textMuted, fontSize: 11.5, textDecoration: "underline", textUnderlineOffset: 2 }}
+                    >
+                      volver a iniciar sesión
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </div>
       </div>
     );
@@ -1104,7 +1220,8 @@ export default function PromotoresApp() {
               <Row label="Salida" value={`${fmtTime(record.checkOutTime)}`} />
               <Row label="Duracion" value={fmtDuration(record.checkInTime, record.checkOutTime)} />
               <Row label="Rollos vendidos" value={record.rollos} />
-              <Row label="Cubetas vendidas" value={record.cubetas} last />
+              <Row label="Cubetas vendidas" value={record.cubetas} />
+              <Row label="Galones vendidos" value={record.galones} last />
               <button
                 onClick={() => setScreen("dashboard")}
                 style={{ width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 10, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
@@ -1124,6 +1241,7 @@ export default function PromotoresApp() {
 
               <Stepper label="Rollos" value={rollos} onChange={setRollos} />
               <Stepper label="Cubetas" value={cubetas} onChange={setCubetas} />
+              <Stepper label="Galones" value={galones} onChange={setGalones} />
 
               {/* Aviso informativo (no bloquea): el servidor valida la distancia real. */}
               {gpsCoords && !inRange && (
@@ -1301,7 +1419,7 @@ export default function PromotoresApp() {
                       </div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0, color: COLORS.accentText, fontFamily: "JetBrains Mono", fontWeight: 800, fontSize: 13 }}>
-                      {v.rollos}R · {v.cubetas}C
+                      {v.rollos}R · {v.cubetas}C · {v.galones}G
                     </div>
                   </div>
                 ))

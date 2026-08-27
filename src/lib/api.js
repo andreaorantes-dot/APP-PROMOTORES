@@ -78,6 +78,12 @@ export const api = {
   login: (promoterId, password) =>
     request("/login", { method: "POST", body: { promoterId, password } }),
 
+  // Solicita recuperación de contraseña: no resetea nada, solo avisa a quien
+  // puede hacerlo (el supervisor del promotor, o admin). Pública — se llama
+  // desde la pantalla de login, sin sesión.
+  recoverRequest: (promoterId) =>
+    request("/auth/recover-request", { method: "POST", body: { promoterId } }),
+
   // NOTE: check-in ahora recibe { coords, photo } — la foto (Base64) es
   // obligatoria y viaja cifrada en la cola si se genera sin red.
 
@@ -103,10 +109,10 @@ export const api = {
       body: { coords, photo },
     }),
 
-  checkOut: (storeId, { coords, rollos, cubetas }) =>
+  checkOut: (storeId, { coords, rollos, cubetas, galones }) =>
     request(`/visits/${encodeURIComponent(storeId)}/check-out`, {
       method: "POST",
-      body: { coords, rollos, cubetas },
+      body: { coords, rollos, cubetas, galones },
     }),
 
   // Today's visit records for the signed-in promoter.
@@ -148,11 +154,18 @@ export const api = {
       body: { meta, nombre },
     }),
 
+  // Reportes de Competencia (marca, descripción, fotos) que enviaron los
+  // promotores — panel de revisión del gerente/admin.
+  managerCompetencia: (signal) => request("/manager/competencia", { signal }),
+
   // --- Supervisor -----------------------------------------------------------
   // Mismo resumen que el del gerente, pero acotado a SUS promotores (lo filtra
   // el servidor por el ID de sesión del supervisor).
   supervisorSummary: (range, signal) =>
     request(`/supervisor/summary${range ? `?range=${encodeURIComponent(range)}` : ""}`, { signal }),
+
+  // Mismos reportes de Competencia, acotados a SU equipo.
+  supervisorCompetencia: (signal) => request("/supervisor/competencia", { signal }),
 
   // --- Notificaciones (campana) ---------------------------------------------
   // Admin/gerente reciben las de "admin" + un insight de Top 5 en vivo;
@@ -162,6 +175,14 @@ export const api = {
   // --- Perfil de promotor (historial) ---------------------------------------
   promoterProfile: (promoterId, signal) =>
     request(`/promoters/${encodeURIComponent(promoterId)}/profile`, { signal }),
+
+  // Reporta un comportamiento extraño sobre una visita puntual del historial
+  // (admin/gerente/supervisor). Se guarda igual que la retroalimentación.
+  reportBehavior: (promoterId, { day, storeName, descripcion }) =>
+    request(`/promoters/${encodeURIComponent(promoterId)}/report-behavior`, {
+      method: "POST",
+      body: { day, storeName, descripcion },
+    }),
 };
 
 export { ApiError };

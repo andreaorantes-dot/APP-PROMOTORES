@@ -22,7 +22,7 @@ export function summarizeVisitRows(rows, prices = {}, range) {
     if (!byPromoter.has(pid)) {
       byPromoter.set(pid, {
         id: pid, name: r.promoter?.name || pid, supervisor: r.promoter?.supervisor || null,
-        rollos: 0, cubetas: 0, visits: [], estados: new Set(),
+        rollos: 0, cubetas: 0, galones: 0, visits: [], estados: new Set(),
         lastActivity: null, lastCheckInTime: null, lastCheckOutTime: null,
         openCount: 0, lat: null, lng: null, _lastTs: 0,
       });
@@ -30,8 +30,10 @@ export function summarizeVisitRows(rows, prices = {}, range) {
     const p = byPromoter.get(pid);
     const rollos = r.rollos || 0;
     const cubetas = r.cubetas || 0;
+    const galones = r.galones || 0;
     p.rollos += rollos;
     p.cubetas += cubetas;
+    p.galones += galones;
     if (r.status === "checked-in") p.openCount += 1;
     if (r.store?.estado) p.estados.add(r.store.estado);
 
@@ -57,7 +59,7 @@ export function summarizeVisitRows(rows, prices = {}, range) {
       lat: typeof r.store?.lat === "number" ? r.store.lat : null,
       lng: typeof r.store?.lng === "number" ? r.store.lng : null,
       status: r.status,
-      rollos, cubetas, money: money(rollos, cubetas),
+      rollos, cubetas, galones, money: money(rollos, cubetas),
       checkInTime: r.checkInTime, checkOutTime: r.checkOutTime,
     });
   }
@@ -68,7 +70,7 @@ export function summarizeVisitRows(rows, prices = {}, range) {
       id: p.id, name: p.name, supervisor: p.supervisor,
       estado: estados[0] || null,
       estados,
-      rollos: p.rollos, cubetas: p.cubetas, money: money(p.rollos, p.cubetas),
+      rollos: p.rollos, cubetas: p.cubetas, galones: p.galones, money: money(p.rollos, p.cubetas),
       storesVisited: p.visits.length,
       status: p.openCount > 0 ? "in" : "done",
       lastActivity: p.lastActivity,
@@ -83,11 +85,12 @@ export function summarizeVisitRows(rows, prices = {}, range) {
   const estadoMap = new Map();
   for (const p of promoters) {
     const est = p.estado || "Sin estado";
-    if (!estadoMap.has(est)) estadoMap.set(est, { estado: est, promoters: 0, rollos: 0, cubetas: 0, money: 0 });
+    if (!estadoMap.has(est)) estadoMap.set(est, { estado: est, promoters: 0, rollos: 0, cubetas: 0, galones: 0, money: 0 });
     const e = estadoMap.get(est);
     e.promoters += 1;
     e.rollos += p.rollos;
     e.cubetas += p.cubetas;
+    e.galones += p.galones;
     e.money += p.money;
   }
   const byEstado = [...estadoMap.values()].sort((a, b) => b.money - a.money);
@@ -98,11 +101,12 @@ export function summarizeVisitRows(rows, prices = {}, range) {
       storesVisited: a.storesVisited + p.storesVisited,
       rollos: a.rollos + p.rollos,
       cubetas: a.cubetas + p.cubetas,
+      galones: a.galones + p.galones,
       money: a.money + p.money,
       checkedIn: a.checkedIn + (p.status === "in" ? 1 : 0),
-      withoutSales: a.withoutSales + (p.rollos + p.cubetas === 0 ? 1 : 0),
+      withoutSales: a.withoutSales + (p.rollos + p.cubetas + p.galones === 0 ? 1 : 0),
     }),
-    { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, money: 0, checkedIn: 0, withoutSales: 0 }
+    { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, galones: 0, money: 0, checkedIn: 0, withoutSales: 0 }
   );
 
   return { range, prices: { rollo: priceRollo, cubeta: priceCubeta }, totals, byEstado, promoters };
