@@ -103,6 +103,7 @@ router.post("/:storeId/check-in", async (req, res) => {
       checkInDistance: distance,
       photo, // persistida en el servidor (en real: blob storage)
     });
+    console.log(`[check-in] OK promotor=${req.promoter.id} tienda=${req.params.storeId}`);
     // Avisa a su supervisor (si tiene uno) que este promotor hizo check-in,
     // con la tienda. Best-effort: no bloquea el check-in si falla.
     notifyCheckIn(req.promoter.id, req.params.storeId).catch(() => {});
@@ -111,6 +112,7 @@ router.post("/:storeId/check-in", async (req, res) => {
     const record = await getVisit(req.promoter.id, req.params.storeId);
     return res.status(201).json(stripPhoto(record));
   } catch (err) {
+    console.error(`[check-in] FALLÓ promotor=${req.promoter?.id} tienda=${req.params.storeId} status=${err?.status} code=${err?.code}:`, err?.message);
     if (err?.code === "P2002") return res.status(409).json({ message: "La visita ya fue registrada" });
     return res.status(err.status ?? 400).json({ message: err.message, distance: err.distance });
   }
@@ -135,6 +137,7 @@ router.post("/:storeId/check-out", async (req, res) => {
       cubetas: Math.max(0, Number(cubetas) || 0),
       galones: Math.max(0, Number(galones) || 0),
     });
+    console.log(`[check-out] OK en Postgres promotor=${req.promoter.id} tienda=${req.params.storeId} id=${record?.id}`);
 
     // Visita completada → agrega una fila al Google Sheet del administrador.
     // Best-effort: no bloquea ni falla el check-out si Sheets no responde.
@@ -144,6 +147,7 @@ router.post("/:storeId/check-out", async (req, res) => {
         getStore(req.params.storeId),
       ]);
       await appendVisitRow({ promoter, store, record });
+      console.log(`[check-out] OK en Sheet promotor=${req.promoter.id} tienda=${req.params.storeId}`);
     } catch (e) {
       console.error("[check-out] Falló el registro en Sheets:", e.message);
     }
@@ -154,6 +158,7 @@ router.post("/:storeId/check-out", async (req, res) => {
 
     return res.json(stripPhoto(record));
   } catch (err) {
+    console.error(`[check-out] FALLÓ promotor=${req.promoter?.id} tienda=${req.params.storeId} status=${err?.status} code=${err?.code}:`, err?.message);
     if (err?.code === "P2002") return res.status(409).json({ message: "La visita ya fue registrada" });
     return res.status(err.status ?? 400).json({ message: err.message, distance: err.distance });
   }
