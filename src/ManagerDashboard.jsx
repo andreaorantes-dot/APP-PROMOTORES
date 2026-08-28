@@ -100,6 +100,17 @@ export default function ManagerDashboard() {
   const [segment, setSegment] = useState("todos"); // todos | con | sin | top
   const [estado, setEstado] = useState("todos");
   const [query, setQuery] = useState("");
+  // Rollos/cubetas/galones: NO son excluyentes entre sí — se pueden marcar
+  // una o varias a la vez (clic en el KPI la prende/apaga). Con al menos una
+  // marcada, filtran el mapa/listado a quien vendió en CUALQUIERA de las
+  // seleccionadas, y las gráficas de abajo (Top vendedores, Ventas por
+  // estado) cambian a sumar solo esas unidades en vez del dinero/total.
+  const [unitFilter, setUnitFilter] = useState(() => new Set());
+  const toggleUnit = (u) => setUnitFilter((prev) => {
+    const next = new Set(prev);
+    next.has(u) ? next.delete(u) : next.add(u);
+    return next;
+  });
   // Rango de fechas (dropdown, solo visible al maximizar). Cambiar el rango
   // vuelve a pedir el resumen al servidor (cada rango agrega días distintos).
   const [range, setRange] = useState("today");
@@ -154,6 +165,7 @@ export default function ManagerDashboard() {
     if (segment === "con") list = list.filter((p) => p.rollos + p.cubetas + p.galones > 0);
     else if (segment === "sin") list = list.filter((p) => p.rollos + p.cubetas + p.galones === 0);
     else if (segment === "in") list = list.filter((p) => p.status === "in");
+    if (unitFilter.size > 0) list = list.filter((p) => [...unitFilter].some((u) => p[u] > 0));
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       list = list.filter((p) => (p.name || "").toLowerCase().includes(q) || String(p.id).includes(q));
@@ -161,14 +173,22 @@ export default function ManagerDashboard() {
     // Nota: el backend ya ordena por dinero desc. Para "top" recortamos a 5.
     if (segment === "top") list = [...list].sort((a, b) => b.money - a.money).slice(0, 5);
     return list;
-  }, [promoters, estado, segment, query]);
+  }, [promoters, estado, segment, query, unitFilter]);
 
-  // Datos para gráficas (por dinero si hay precios; si no, por unidades).
-  const metric = (p) => (useMoney ? p.money : p.rollos + p.cubetas + p.galones);
-  const metricFmt = useMoney ? fmtMoney : fmtNum;
+  // Datos para gráficas: por dinero si hay precios (y no hay unidad
+  // específica marcada); si se marcó rollos/cubetas/galones, suma SOLO esas;
+  // si no, cae a unidades totales.
+  const metric = unitFilter.size > 0
+    ? (p) => [...unitFilter].reduce((sum, u) => sum + (p[u] || 0), 0)
+    : (p) => (useMoney ? p.money : p.rollos + p.cubetas + p.galones);
+  const metricFmt = unitFilter.size > 0 ? fmtNum : (useMoney ? fmtMoney : fmtNum);
+  const UNIT_LABELS = { rollos: "rollos", cubetas: "cubetas", galones: "galones" };
+  const unitLabel = unitFilter.size > 0
+    ? [...unitFilter].map((u) => UNIT_LABELS[u]).join(" + ")
+    : (useMoney ? "dinero" : "unidades");
   const topData = useMemo(
     () => [...filtered].sort((a, b) => metric(b) - metric(a)).slice(0, 8).map((p) => ({ label: p.name, value: metric(p) })),
-    [filtered, useMoney]
+    [filtered, useMoney, unitFilter]
   );
   const estadoData = useMemo(() => {
     const m = new Map();
@@ -177,7 +197,7 @@ export default function ManagerDashboard() {
       m.set(k, (m.get(k) || 0) + metric(p));
     }
     return [...m.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-  }, [filtered, useMoney]);
+  }, [filtered, useMoney, unitFilter]);
   const composicion = useMoney
     ? [
         { label: "Rollos ($)", value: totals.rollos * prices.rollo },
@@ -296,18 +316,18 @@ export default function ManagerDashboard() {
         />
         <Kpi
           icon={TrendingUp} label="Rollos" value={fmtNum(totals.rollos)}
-          tooltip="Total de rollos vendidos por todos los promotores en este período."
-          onClick={() => setSegment("con")} active={segment === "con"}
+          tooltip="Total de rollos vendidos en este período. Clic para filtrar el mapa y las gráficas a quien vendió rollos — puedes combinarlo con cubetas/galones."
+          onClick={() => toggleUnit("rollos")} active={unitFilter.has("rollos")}
         />
         <Kpi
           icon={TrendingUp} label="Cubetas" value={fmtNum(totals.cubetas)}
-          tooltip="Total de cubetas vendidas por todos los promotores en este período."
-          onClick={() => setSegment("con")} active={segment === "con"}
+          tooltip="Total de cubetas vendidas en este período. Clic para filtrar el mapa y las gráficas a quien vendió cubetas — puedes combinarlo con rollos/galones."
+          onClick={() => toggleUnit("cubetas")} active={unitFilter.has("cubetas")}
         />
         <Kpi
           icon={TrendingUp} label="Galones" value={fmtNum(totals.galones)}
-          tooltip="Total de galones vendidos por todos los promotores en este período."
-          onClick={() => setSegment("con")} active={segment === "con"}
+          tooltip="Total de galones vendidos en este período. Clic para filtrar el mapa y las gráficas a quien vendió galones — puedes combinarlo con rollos/cubetas."
+          onClick={() => toggleUnit("galones")} active={unitFilter.has("galones")}
         />
         <Kpi
           icon={Users} label="Activos" value={fmtNum(totals.promoters)}
@@ -439,10 +459,10 @@ export default function ManagerDashboard() {
                       <span>Configura <b>PRECIO_ROLLO</b> y <b>PRECIO_CUBETA</b> en el backend para ver montos en dinero. Mientras tanto, las gráficas muestran cantidades.</span>
                     </div>
                   )}
-                  <ChartCard title={`Top vendedores ${useMoney ? "(dinero)" : "(unidades)"}`}>
+                  <ChartCard title={`Top vendedores (${unitLabel})`}>
                     <BarChart data={topData} color={COLORS.accent} format={metricFmt} />
                   </ChartCard>
-                  <ChartCard title={`Ventas por estado ${useMoney ? "(dinero)" : "(unidades)"}`}>
+                  <ChartCard title={`Ventas por estado (${unitLabel})`}>
                     <BarChart data={estadoData} color={COLORS.success} format={metricFmt} />
                   </ChartCard>
                   <ChartCard title="Composición del período">
