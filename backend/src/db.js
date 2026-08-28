@@ -6,7 +6,7 @@
 // persiste (Base64) en la columna VisitRecord.photo.
 import { prisma, withWriteRetry } from "./prisma.js";
 import { config } from "./config.js";
-import { findPromoterInSheet } from "./promotersSheet.js";
+import { findPromoterInSheet, getAllPromotersFromSheet } from "./promotersSheet.js";
 import { ensureStoresSynced } from "./storesSheet.js";
 import { summarizeVisitRows } from "./managerSummary.js";
 import { fetchVisitRowsFromSheet } from "./activitySheet.js";
@@ -188,6 +188,23 @@ export async function getManagerSummary(rangeKey = "today", { supervisorId } = {
           where: { day: { gte: range.from, lte: range.to } },
           include: { promoter: true, store: true },
         });
+
+  // Con AUTH_SOURCE=sheet, `promoter` viene del mirror local en Postgres, que
+  // solo se refresca en el SIGUIENTE check-in/check-out de cada promotor (ver
+  // ensurePromoterExistsLocally) — una visita ya abierta antes de que el admin
+  // llenara/corrigiera el estado en el Sheet se quedaría con estado/supervisor
+  // desactualizados hasta que esa visita se cierre. Para que el filtro de
+  // estado siempre refleje lo que el Sheet dice AHORA (fuente de verdad,
+  // editable por el admin), sobreescribimos con una lectura fresca del Sheet
+  // (cacheada unos minutos, no golpea la API en cada carga del tablero).
+  if (config.authSource === "sheet" && config.visitsSource !== "sheet") {
+    const sheetPromoters = await getAllPromotersFromSheet();
+    rows = rows.map((r) => {
+      const sp = sheetPromoters.get(r.promoterId);
+      if (!sp) return r;
+      return { ...r, promoter: { ...r.promoter, name: sp.name || r.promoter?.name, supervisor: sp.supervisor ?? r.promoter?.supervisor ?? null, estado: sp.estado ?? null } };
+    });
+  }
 
   if (supervisorId) {
     rows = rows.filter((r) => (r.promoter?.supervisor || "").trim().toLowerCase() === supervisorId);
