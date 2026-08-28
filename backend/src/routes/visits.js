@@ -91,20 +91,39 @@ router.post("/:storeId/check-in", async (req, res) => {
   try {
     const { coords, photo } = req.body ?? {};
     assertValidPhoto(photo);
-    const { distance } = await assertInRange(req.promoter.id, req.params.storeId, coords);
+    const { store, distance } = await assertInRange(req.promoter.id, req.params.storeId, coords);
 
     const existing = await getVisit(req.promoter.id, req.params.storeId);
     if (existing?.status === "checked-in" || existing?.status === "checked-out") {
       return res.status(409).json({ message: "La visita ya fue iniciada" });
     }
 
-    await submitVisitReport(req.promoter.id, req.params.storeId, {
+    const promoter = await findPromoterById(req.promoter.id);
+    const checkInTime = new Date().toISOString();
+
+    // Postgres (fuente de verdad de la app) y el Sheet (auditoría humana en
+    // "Actividad Diaria") se disparan EN PARALELO — el Sheet no espera a que
+    // Postgres termine. La fila del check-in queda con hora_salida = "0"
+    // (visita todavía abierta); el check-out agrega su PROPIA fila después.
+    const dbWrite = submitVisitReport(req.promoter.id, req.params.storeId, {
       status: "checked-in",
-      checkInTime: new Date().toISOString(),
+      checkInTime,
       checkInDistance: distance,
       photo, // persistida en el servidor (en real: blob storage)
     });
-    console.log(`[check-in] OK promotor=${req.promoter.id} tienda=${req.params.storeId}`);
+    const sheetWrite = appendVisitRow({
+      promoter, store, storeId: req.params.storeId,
+      checkInTime, checkOutTime: null,
+      rollos: 0, cubetas: 0, galones: 0,
+    }).then((result) => {
+      if (result?.error) console.error("[check-in] Falló el registro en Sheets:", result.error);
+      else console.log(`[check-in] OK en Sheet promotor=${req.promoter.id} tienda=${req.params.storeId}`);
+    });
+
+    await dbWrite;
+    console.log(`[check-in] OK en Postgres promotor=${req.promoter.id} tienda=${req.params.storeId}`);
+    sheetWrite.catch(() => {});
+
     // Avisa a su supervisor (si tiene uno) que este promotor hizo check-in,
     // con la tienda. Best-effort: no bloquea el check-in si falla.
     notifyCheckIn(req.promoter.id, req.params.storeId).catch(() => {});
@@ -123,35 +142,42 @@ router.post("/:storeId/check-in", async (req, res) => {
 router.post("/:storeId/check-out", async (req, res) => {
   try {
     const { coords, rollos, cubetas, galones } = req.body ?? {};
-    const { distance } = await assertInRange(req.promoter.id, req.params.storeId, coords);
+    const { store, distance } = await assertInRange(req.promoter.id, req.params.storeId, coords);
 
     const existing = await getVisit(req.promoter.id, req.params.storeId);
     if (existing?.status !== "checked-in") {
       return res.status(409).json({ message: "No hay una entrada activa para cerrar" });
     }
 
-    const record = await submitVisitReport(req.promoter.id, req.params.storeId, {
-      status: "checked-out",
-      checkOutTime: new Date().toISOString(),
-      checkOutDistance: distance,
-      rollos: Math.max(0, Number(rollos) || 0),
-      cubetas: Math.max(0, Number(cubetas) || 0),
-      galones: Math.max(0, Number(galones) || 0),
-    });
-    console.log(`[check-out] OK en Postgres promotor=${req.promoter.id} tienda=${req.params.storeId} id=${record?.id}`);
+    const promoter = await findPromoterById(req.promoter.id);
+    const checkOutTime = new Date().toISOString();
+    const rollosNum = Math.max(0, Number(rollos) || 0);
+    const cubetasNum = Math.max(0, Number(cubetas) || 0);
+    const galonesNum = Math.max(0, Number(galones) || 0);
 
-    // Visita completada → agrega una fila al Google Sheet del administrador.
-    // Best-effort: no bloquea ni falla el check-out si Sheets no responde.
-    try {
-      const [promoter, store] = await Promise.all([
-        findPromoterById(req.promoter.id),
-        getStore(req.params.storeId),
-      ]);
-      await appendVisitRow({ promoter, store, record });
-      console.log(`[check-out] OK en Sheet promotor=${req.promoter.id} tienda=${req.params.storeId}`);
-    } catch (e) {
-      console.error("[check-out] Falló el registro en Sheets:", e.message);
-    }
+    // Postgres y el Sheet en PARALELO, igual que en el check-in. La fila del
+    // Sheet REPITE checkInTime (de la visita ya abierta) para que, ella sola,
+    // ya tenga entrada y salida — sin esperar a que Postgres confirme el cierre.
+    const dbWrite = submitVisitReport(req.promoter.id, req.params.storeId, {
+      status: "checked-out",
+      checkOutTime,
+      checkOutDistance: distance,
+      rollos: rollosNum,
+      cubetas: cubetasNum,
+      galones: galonesNum,
+    });
+    const sheetWrite = appendVisitRow({
+      promoter, store, storeId: req.params.storeId,
+      checkInTime: existing.checkInTime, checkOutTime,
+      rollos: rollosNum, cubetas: cubetasNum, galones: galonesNum,
+    }).then((result) => {
+      if (result?.error) console.error("[check-out] Falló el registro en Sheets:", result.error);
+      else console.log(`[check-out] OK en Sheet promotor=${req.promoter.id} tienda=${req.params.storeId}`);
+    });
+
+    const record = await dbWrite;
+    console.log(`[check-out] OK en Postgres promotor=${req.promoter.id} tienda=${req.params.storeId} id=${record?.id}`);
+    sheetWrite.catch(() => {});
 
     // ¿Este check-out hace que el promotor o la tienda lleguen a su meta
     // mensual? Best-effort y en segundo plano: no retrasa la respuesta.

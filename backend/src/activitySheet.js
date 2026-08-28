@@ -9,10 +9,14 @@
 // appendVisitRow en sheets.js) y las alimentamos al MISMO agregador puro
 // (managerSummary.js) que usa la ruta real. Actívalo con VISITS_SOURCE=sheet.
 //
-// LIMITACIÓN CONOCIDA: esa pestaña solo registra visitas ya CERRADAS (el
-// check-out completo es lo único que se escribe ahí). Por eso, con esta
-// fuente, ningún promotor aparecerá "en tienda" (checked-in abierto): todas
-// las filas se tratan como `status: "checked-out"`.
+// Desde que check-in y check-out escriben CADA UNO su propia fila (ver
+// appendVisitRow en sheets.js), una visita puede tener DOS filas aquí: la del
+// check-in (hora_salida = "0", visita abierta) y la del check-out (repite
+// hora_entrada, con hora_salida real). Se deduplican por (promotor, tienda,
+// día): si existe la fila cerrada, esa gana (trae los datos completos); si
+// solo existe la abierta, el promotor se ve "en tienda" — a diferencia de
+// antes, esta fuente YA puede mostrar visitas abiertas. Las filas viejas (de
+// antes de este cambio) solo tenían la fila cerrada; siguen leyéndose igual.
 //
 // Las columnas se leen por POSICIÓN, no por el texto del encabezado: deben
 // coincidir exactamente con el orden que escribe appendVisitRow en sheets.js
@@ -84,7 +88,11 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
   // SUPERVISOR pertenece cada uno — el Sheet de auditoría no trae esa columna.
   const promotersById = await getAllPromotersFromSheet();
 
-  const out = [];
+  // Clave (promotor, tienda, día) -> la mejor fila vista hasta ahora (una
+  // fila cerrada siempre gana sobre una abierta, sin importar el orden en
+  // que aparezcan en el Sheet).
+  const byKey = new Map();
+
   // Fila 0 es el encabezado; los datos empiezan en la fila 1.
   for (let r = 1; r < rows.length; r++) {
     const [registradoEn, promoterId, promoterName, storeName, horaEntrada, horaSalida, rollosRaw, cubetasRaw, galonesRaw] = rows[r] || [];
@@ -94,6 +102,7 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
     // ISO/UTC (filas viejas, con "T") o texto plano en hora de México (filas
     // nuevas, ver formatMexicoDateTime en sheets.js) — parseSheetDateTime
     // entiende ambos y siempre devuelve un instante real sin ambigüedad.
+    // "0" (la fila del check-in, visita abierta) también cae en null aquí.
     const checkInDate = parseSheetDateTime(horaEntrada) || parseSheetDateTime(registradoEn);
     const checkOutDate = parseSheetDateTime(horaSalida);
     if (!checkInDate) continue; // fila con fecha ilegible: se descarta, no se rompe
@@ -102,24 +111,35 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
 
     const match = storeByName.get(String(storeName).trim().toLowerCase());
     const storeId = match?.id ?? slugify(storeName);
+    const pid = String(promoterId).trim();
+    const key = `${pid}|${storeId}|${rowDay}`;
 
-    out.push({
+    const candidate = {
       day: rowDay,
-      promoterId: String(promoterId).trim(),
-      promoter: { name: promoterName || promoterId, supervisor: promotersById.get(String(promoterId).trim())?.supervisor ?? null },
+      promoterId: pid,
+      promoter: { name: promoterName || pid, supervisor: promotersById.get(pid)?.supervisor ?? null },
       storeId,
       store: match
         ? { name: match.name, estado: match.estado, lat: match.lat, lng: match.lng }
         : { name: storeName, estado: null, lat: null, lng: null },
-      // Esta pestaña solo registra check-outs completos: no hay forma de ver
-      // aquí a un promotor que sigue "en tienda" (checked-in abierto).
-      status: "checked-out",
+      status: checkOutDate ? "checked-out" : "checked-in",
       rollos: Number(rollosRaw) || 0,
       cubetas: Number(cubetasRaw) || 0,
       galones: Number(galonesRaw) || 0,
       checkInTime: checkInDate.toISOString(),
       checkOutTime: checkOutDate ? checkOutDate.toISOString() : null,
-    });
+    };
+
+    const existing = byKey.get(key);
+    // Una fila cerrada siempre gana sobre una abierta; entre dos del mismo
+    // tipo, se queda la más reciente (checkInTime mayor).
+    if (
+      !existing ||
+      (existing.status === "checked-in" && candidate.status === "checked-out") ||
+      (existing.status === candidate.status && candidate.checkInTime > existing.checkInTime)
+    ) {
+      byKey.set(key, candidate);
+    }
   }
-  return out;
+  return [...byKey.values()];
 }

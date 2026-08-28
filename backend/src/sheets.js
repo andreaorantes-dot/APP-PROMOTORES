@@ -7,7 +7,8 @@
 //   - GOOGLE_SERVICE_ACCOUNT_JSON = el contenido JSON completo (ideal para
 //     variables de entorno / Secret Files en la nube), o
 //   - GOOGLE_SERVICE_ACCOUNT_KEY_FILE = ruta a un archivo .json.
-// Además: GOOGLE_SHEETS_ID (id del documento) y GOOGLE_SHEETS_TAB (pestaña).
+// Además: GOOGLE_SHEETS_ID (id del documento) y GOOGLE_SHEETS_ACTIVIDAD_TAB
+// (pestaña "Actividad Diaria", donde se escriben las filas de check-in/out).
 //
 // Si falta configuración o algo falla, la integración se omite y el check-out
 // NO se ve afectado (best-effort).
@@ -85,13 +86,13 @@ async function ensureHeader(sheets) {
   if (headerEnsured) return;
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.sheets.spreadsheetId,
-    range: `${config.sheets.tab}!A1:Z1`,
+    range: `${config.sheets.actividadTab}!A1:Z1`,
   });
   const current = (res.data.values && res.data.values[0]) || [];
   if (current.length < HEADERS.length) {
     await sheets.spreadsheets.values.update({
       spreadsheetId: config.sheets.spreadsheetId,
-      range: `${config.sheets.tab}!A1`,
+      range: `${config.sheets.actividadTab}!A1`,
       valueInputOption: "RAW",
       requestBody: { values: [HEADERS] },
     });
@@ -169,10 +170,15 @@ export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripc
   return { appended: true };
 }
  
-// Agrega una fila con los datos de la visita completada. Best-effort: nunca
-// lanza hacia el caller (registra el error y sigue), para no afectar al
-// check-out del promotor.
-export async function appendVisitRow({ promoter, store, record }) {
+// Agrega una fila a "Actividad Diaria" — una por EVENTO (no una por visita
+// completa): el check-in agrega la suya de inmediato (con hora_salida en "0",
+// para distinguirla a simple vista de una visita cerrada) y el check-out
+// agrega otra propia después (repitiendo checkInTime, para que esa fila sola
+// ya tenga las dos horas). Ninguna de las dos espera a que Postgres termine
+// primero — se disparan en paralelo (ver routes/visits.js). Best-effort:
+// nunca lanza hacia el caller (registra el error y sigue), para no afectar al
+// check-in/check-out del promotor.
+export async function appendVisitRow({ promoter, store, storeId, checkInTime, checkOutTime, rollos, cubetas, galones }) {
   if (!isConfigured()) {
     console.warn("[sheets] Integración no configurada (faltan credenciales o spreadsheetId); se omite.");
     return { skipped: true };
@@ -184,16 +190,16 @@ export async function appendVisitRow({ promoter, store, record }) {
       formatMexicoDateTime(new Date()), // registrado_en (hora de México, no UTC)
       promoter.id, // ID promotor
       promoter.name, // Nombre promotor
-      store?.name ?? record.storeId, // Tienda
-      formatMexicoDateTime(record.checkInTime), // Hora entrada (hora de México)
-      formatMexicoDateTime(record.checkOutTime), // Hora salida (hora de México)
-      record.rollos ?? 0, // Inventario: rollos
-      record.cubetas ?? 0, // Inventario: cubetas
-      record.galones ?? 0, // Inventario: galones
+      store?.name ?? storeId, // Tienda
+      formatMexicoDateTime(checkInTime), // Hora entrada (hora de México)
+      checkOutTime ? formatMexicoDateTime(checkOutTime) : "0", // Hora salida: "0" = check-in todavía abierto
+      rollos ?? 0, // Inventario: rollos
+      cubetas ?? 0, // Inventario: cubetas
+      galones ?? 0, // Inventario: galones
     ];
     await sheets.spreadsheets.values.append({
       spreadsheetId: config.sheets.spreadsheetId,
-      range: `${config.sheets.tab}!A1`,
+      range: `${config.sheets.actividadTab}!A1`,
       valueInputOption: "USER_ENTERED",
       insertDataOption: "INSERT_ROWS",
       requestBody: { values: [row] },
@@ -227,7 +233,7 @@ export async function checkSheetsConnection() {
       ok: true,
       serviceAccountEmail: clientEmail,
       spreadsheetTitle: meta.data.properties?.title,
-      tab: config.sheets.tab,
+      tab: config.sheets.actividadTab,
     };
   } catch (err) {
     return {
