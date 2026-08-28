@@ -22,6 +22,7 @@ model Promoter {
   name               String
   location           String? // UBICACION
   supervisor         String? // SUPERVISOR
+  estado             String? // ESTADO de México asignado al promotor (columna "Estado" de la pestaña Promotores). Fijo, no se deriva de las tiendas visitadas.
   password           String // hash bcrypt de la contraseña (nunca en texto plano)
   createdAt          DateTime            @default(now())
   visits             VisitRecord[]

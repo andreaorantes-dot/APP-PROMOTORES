@@ -39,7 +39,7 @@ async function loadPromoters() {
     range: `${config.sheets.promotersTab}!A1:Z2000`,
   });
   const rows = res.data.values ?? [];
-  let header = -1, idC = -1, passC = -1, nameC = -1, locC = -1, supC = -1;
+  let header = -1, idC = -1, passC = -1, nameC = -1, locC = -1, supC = -1, estC = -1;
   for (let r = 0; r < rows.length; r++) {
     const cells = rows[r].map((c) => String(c ?? "").trim());
     const idI = cells.findIndex((c) => /^id$/i.test(c));
@@ -49,11 +49,12 @@ async function loadPromoters() {
       nameC = cells.findIndex((c) => /promotor|nombre/i.test(c));
       locC = cells.findIndex((c) => /ubicaci/i.test(c));
       supC = cells.findIndex((c) => /supervisor/i.test(c));
+      estC = cells.findIndex((c) => /^estado$/i.test(c));
       break;
     }
   }
   if (header === -1) throw new Error(`Encabezado (ID + CONTRASEÑA) no encontrado en "${config.sheets.promotersTab}".`);
- 
+
   const byId = new Map();
   for (let r = header + 1; r < rows.length; r++) {
     const cells = rows[r];
@@ -64,6 +65,7 @@ async function loadPromoters() {
       name: String(cells?.[nameC] ?? "").trim(),
       location: locC !== -1 ? String(cells?.[locC] ?? "").trim() : null,
       supervisor: supC !== -1 ? String(cells?.[supC] ?? "").trim() : null,
+      estado: estC !== -1 ? String(cells?.[estC] ?? "").trim() || null : null,
       password: String(cells?.[passC] ?? "").trim(), // hash bcrypt
     });
   }

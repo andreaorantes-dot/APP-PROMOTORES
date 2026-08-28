@@ -135,7 +135,7 @@ Todo vive en **un solo documento** ("BBDD Promotores"), con estas pestañas:
 
 | Pestaña | Para qué | Quién la lee/escribe |
 |---|---|---|
-| **Promotores** | ID, nombre, ubicación, supervisor, contraseña (hash) de cada promotor | Login de promotores (`promotersSheet.js`); todos los tableros leen aquí el nombre de supervisor de cada promotor |
+| **Promotores** | ID, nombre, ubicación, supervisor, **estado** (uno de los 32 estados de México, fijo por promotor — alimenta el filtro de estado del gerente), contraseña (hash) de cada promotor | Login de promotores (`promotersSheet.js`); todos los tableros leen aquí el nombre de supervisor y el estado de cada promotor |
 | **Tiendas** | Catálogo global de tiendas (num, nombre, lat, lng, **estado**) | `storesSheet.js`, sincroniza a la BD local con `STORES_SOURCE=sheet` |
 | **Usuarios** | ID, nombre, rol (`admin`\|`gerente`\|`supervisor`), contraseña (hash) | Login de administración (`usersSheet.js`) — **nunca** promotores de campo |
 | **Metas** | Tipo (`promotor`\|`tienda`), ID, nombre, meta mensual en **unidades** (rollos+cubetas+galones) | `goalsSheet.js` — el botón "Meta" del tablero de admin **escribe** aquí |

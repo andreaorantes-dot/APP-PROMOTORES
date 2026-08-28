@@ -117,7 +117,11 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
     const candidate = {
       day: rowDay,
       promoterId: pid,
-      promoter: { name: promoterName || pid, supervisor: promotersById.get(pid)?.supervisor ?? null },
+      promoter: {
+        name: promoterName || pid,
+        supervisor: promotersById.get(pid)?.supervisor ?? null,
+        estado: promotersById.get(pid)?.estado ?? null,
+      },
       storeId,
       store: match
         ? { name: match.name, estado: match.estado, lat: match.lat, lng: match.lng }

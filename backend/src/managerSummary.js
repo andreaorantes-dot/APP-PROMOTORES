@@ -8,8 +8,15 @@
 // solo se devuelve tal cual para que el frontend sepa qué período está viendo.
 //
 // Forma esperada de cada fila:
-//   { promoterId, promoter:{name,supervisor}, storeId, store:{name,estado,lat,lng},
+//   { promoterId, promoter:{name,supervisor,estado}, storeId, store:{name,estado,lat,lng},
 //     status, rollos, cubetas, day, checkInTime, checkOutTime }
+//
+// El `estado` del PROMOTOR (usado para el filtro y "Ventas por estado") es un
+// dato fijo asignado al promotor (promoter.estado, columna "Estado" de la
+// pestaña Promotores) — no se deriva de en qué estado están las tiendas que
+// visitó, para que un promotor sin actividad hoy o que cubre tiendas de otro
+// estado igual aparezca en SU estado. `store.estado` (por visita) se conserva
+// tal cual, es información de la tienda, no del promotor.
 
 export function summarizeVisitRows(rows, prices = {}, range) {
   const priceRollo = Number(prices.rollo || 0);
@@ -22,7 +29,8 @@ export function summarizeVisitRows(rows, prices = {}, range) {
     if (!byPromoter.has(pid)) {
       byPromoter.set(pid, {
         id: pid, name: r.promoter?.name || pid, supervisor: r.promoter?.supervisor || null,
-        rollos: 0, cubetas: 0, galones: 0, visits: [], estados: new Set(),
+        estado: r.promoter?.estado || null,
+        rollos: 0, cubetas: 0, galones: 0, visits: [],
         lastActivity: null, lastCheckInTime: null, lastCheckOutTime: null,
         openCount: 0, lat: null, lng: null, _lastTs: 0,
       });
@@ -35,7 +43,6 @@ export function summarizeVisitRows(rows, prices = {}, range) {
     p.cubetas += cubetas;
     p.galones += galones;
     if (r.status === "checked-in") p.openCount += 1;
-    if (r.store?.estado) p.estados.add(r.store.estado);
 
     const inTs = r.checkInTime ? new Date(r.checkInTime).getTime() : 0;
     const outTs = r.checkOutTime ? new Date(r.checkOutTime).getTime() : 0;
@@ -65,11 +72,9 @@ export function summarizeVisitRows(rows, prices = {}, range) {
   }
 
   const promoters = [...byPromoter.values()].map((p) => {
-    const estados = [...p.estados];
     return {
       id: p.id, name: p.name, supervisor: p.supervisor,
-      estado: estados[0] || null,
-      estados,
+      estado: p.estado,
       rollos: p.rollos, cubetas: p.cubetas, galones: p.galones, money: money(p.rollos, p.cubetas),
       storesVisited: p.visits.length,
       status: p.openCount > 0 ? "in" : "done",

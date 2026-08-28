@@ -70,16 +70,19 @@ async function ensurePromoterExistsLocally(promoterId) {
   if (config.authSource !== "sheet") return;
   const p = await findPromoterInSheet(promoterId);
   if (!p) return;
+  // `update` refleja los mismos campos que `create`: así, si el promotor ya
+  // tenía fila local (de un login anterior), cambios posteriores en el Sheet
+  // (ubicación, supervisor, estado) sí se propagan en el siguiente check-in.
+  const fields = {
+    name: p.name || p.id,
+    location: p.location ?? null,
+    supervisor: p.supervisor ?? null,
+    estado: p.estado ?? null,
+  };
   await prisma.promoter.upsert({
     where: { id: p.id },
-    update: {},
-    create: {
-      id: p.id,
-      name: p.name || p.id,
-      location: p.location ?? null,
-      supervisor: p.supervisor ?? null,
-      password: p.password ?? "",
-    },
+    update: fields,
+    create: { id: p.id, password: p.password ?? "", ...fields },
   });
 }
 
