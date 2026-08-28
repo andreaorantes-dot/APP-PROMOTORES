@@ -22,6 +22,58 @@ export function todayKey() {
   return dayKeyOf(new Date());
 }
 
+// Fecha+hora completas en hora de México, como texto plano "YYYY-MM-DD HH:mm:ss"
+// (sin "Z" ni offset) — para escribir en el Sheet. A propósito NO es ISO: si
+// lleváramos el offset, Sheets/Excel a veces lo re-interpreta o lo ignora al
+// graficar/ordenar; como texto plano en hora local, lo que ves es lo que es.
+const dateTimeFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: BUSINESS_TIMEZONE,
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit",
+  hour12: false,
+});
+
+export function formatMexicoDateTime(date) {
+  if (!date) return "";
+  const d = typeof date === "string" || typeof date === "number" ? new Date(date) : date;
+  if (Number.isNaN(d?.getTime?.())) return "";
+  const parts = Object.fromEntries(dateTimeFormatter.formatToParts(d).map((p) => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+}
+
+// Inverso de formatMexicoDateTime: toma "YYYY-MM-DD HH:mm:ss" (hora de
+// México, sin offset) y devuelve el instante real (Date, en UTC internamente
+// como cualquier Date de JS). No asume "-6" a mano: calcula el offset real de
+// América/Ciudad_de_México en ese instante vía Intl, por si algún día cambia.
+export function parseMexicoDateTime(str) {
+  if (!str) return null;
+  const [datePart, timePart] = String(str).trim().split(" ");
+  const [y, m, d] = (datePart || "").split("-").map(Number);
+  const [h, min, s] = (timePart || "00:00:00").split(":").map(Number);
+  if (!y || !m || !d) return null;
+  const guessUtc = new Date(Date.UTC(y, m - 1, d, h || 0, min || 0, s || 0));
+  const parts = Object.fromEntries(dateTimeFormatter.formatToParts(guessUtc).map((p) => [p.type, p.value]));
+  const guessAsMexicoWallClock = Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour), Number(parts.minute), Number(parts.second)
+  );
+  const offsetMs = guessUtc.getTime() - guessAsMexicoWallClock;
+  return new Date(guessUtc.getTime() + offsetMs);
+}
+
+// Interpreta una fecha/hora tal como viene guardada en el Sheet, sin importar
+// si es una fila vieja (ISO/UTC, con "T" y "Z") o una nueva (hora de México en
+// texto plano, escrita por formatMexicoDateTime) — para no romper filas
+// escritas antes de este cambio. Devuelve un Date real o null.
+export function parseSheetDateTime(str) {
+  if (!str) return null;
+  if (String(str).includes("T")) {
+    const d = new Date(str);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return parseMexicoDateTime(str);
+}
+
 // Día de la semana (0=lunes ... 6=domingo) de una clave "YYYY-MM-DD". Se
 // calcula con Date.UTC solo como truco aritmético sobre el triple año/mes/día
 // (ya en hora de México); no representa un instante real, así que no hay

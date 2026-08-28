@@ -9,6 +9,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { config } from "./config.js";
+import { formatMexicoDateTime } from "./businessDay.js";
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 const HEADERS = ["registrado_en", "id_promotor", "nombre", "marca", "descripcion", "fotos"];
@@ -74,7 +75,7 @@ export async function appendCompetitionRow({ promoterId, promoterName, marca, de
     const sheets = await getClient();
     await ensureTab(sheets);
     const row = [
-      new Date().toISOString(),
+      formatMexicoDateTime(new Date()), // registrado_en (hora de México, no UTC)
       promoterId,
       promoterName,
       marca,

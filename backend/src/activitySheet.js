@@ -25,7 +25,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { config } from "./config.js";
 import { prisma } from "./prisma.js";
-import { dayKeyOf } from "./businessDay.js";
+import { dayKeyOf, parseSheetDateTime } from "./businessDay.js";
 import { getAllPromotersFromSheet } from "./promotersSheet.js";
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"];
@@ -90,8 +90,14 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
     const [registradoEn, promoterId, promoterName, storeName, horaEntrada, horaSalida, rollosRaw, cubetasRaw, galonesRaw] = rows[r] || [];
     if (!promoterId || !storeName) continue; // fila vacía/incompleta
 
-    const checkInTime = horaEntrada || registradoEn || null;
-    const rowDay = dayKeyOf(new Date(checkInTime || registradoEn));
+    // registrado_en/hora_entrada/hora_salida pueden venir en dos formatos:
+    // ISO/UTC (filas viejas, con "T") o texto plano en hora de México (filas
+    // nuevas, ver formatMexicoDateTime en sheets.js) — parseSheetDateTime
+    // entiende ambos y siempre devuelve un instante real sin ambigüedad.
+    const checkInDate = parseSheetDateTime(horaEntrada) || parseSheetDateTime(registradoEn);
+    const checkOutDate = parseSheetDateTime(horaSalida);
+    if (!checkInDate) continue; // fila con fecha ilegible: se descarta, no se rompe
+    const rowDay = dayKeyOf(checkInDate);
     if (rowDay < from || rowDay > to) continue; // comparación lexicográfica válida en "YYYY-MM-DD"
 
     const match = storeByName.get(String(storeName).trim().toLowerCase());
@@ -111,8 +117,8 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
       rollos: Number(rollosRaw) || 0,
       cubetas: Number(cubetasRaw) || 0,
       galones: Number(galonesRaw) || 0,
-      checkInTime,
-      checkOutTime: horaSalida || null,
+      checkInTime: checkInDate.toISOString(),
+      checkOutTime: checkOutDate ? checkOutDate.toISOString() : null,
     });
   }
   return out;

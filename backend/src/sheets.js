@@ -14,6 +14,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { config } from "./config.js";
+import { formatMexicoDateTime } from "./businessDay.js";
  
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
  
@@ -150,7 +151,7 @@ export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripc
   const sheets = await getSheetsClient();
   await ensureFeedbackTab(sheets);
   const row = [
-    new Date().toISOString(), // registrado_en
+    formatMexicoDateTime(new Date()), // registrado_en (hora de México, no UTC)
     idPromotor, // id_promotor
     nombre, // nombre
     sucursal, // sucursal
@@ -180,12 +181,12 @@ export async function appendVisitRow({ promoter, store, record }) {
     const sheets = await getSheetsClient();
     await ensureHeader(sheets);
     const row = [
-      new Date().toISOString(), // registrado_en
+      formatMexicoDateTime(new Date()), // registrado_en (hora de México, no UTC)
       promoter.id, // ID promotor
       promoter.name, // Nombre promotor
       store?.name ?? record.storeId, // Tienda
-      record.checkInTime ?? "", // Hora entrada
-      record.checkOutTime ?? "", // Hora salida
+      formatMexicoDateTime(record.checkInTime), // Hora entrada (hora de México)
+      formatMexicoDateTime(record.checkOutTime), // Hora salida (hora de México)
       record.rollos ?? 0, // Inventario: rollos
       record.cubetas ?? 0, // Inventario: cubetas
       record.galones ?? 0, // Inventario: galones
