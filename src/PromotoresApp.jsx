@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound, Heart } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
@@ -439,6 +439,76 @@ export default function PromotoresApp() {
   const openVisit = Object.values(records).find((r) => r?.status === "checked-in");
   const openVisitStore = openVisit ? allStores.find((s) => s.id === openVisit.storeId) : null;
   const showCheckoutReminder = Boolean(openVisit) && new Date().getHours() >= 19;
+
+  // Confirmación "sigo en tienda": una vez al día, en un momento aleatorio
+  // entre 10am y 4pm (hora del dispositivo), mientras tenga un check-in
+  // abierto. El momento se calcula con una semilla (ID + día) para que sea el
+  // mismo durante todo el día aunque recargue la app, sin backend nuevo para
+  // decidir CUÁNDO mostrarlo — solo para GUARDAR la confirmación.
+  const [presenceModalOpen, setPresenceModalOpen] = useState(false);
+  const [presenceSending, setPresenceSending] = useState(false);
+  const [presenceError, setPresenceError] = useState("");
+
+  useEffect(() => {
+    if (status !== "authed" || !user) return;
+    const check = () => {
+      if (presenceModalOpen || !openVisit) return;
+      const dayKey = new Date().toLocaleDateString("en-CA");
+      const doneKey = `presence_confirmed_${user.id}_${dayKey}`;
+      if (localStorage.getItem(doneKey)) return;
+      let h = 0;
+      const seed = `${user.id}-${dayKey}`;
+      for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+      const startMin = 10 * 60, endMin = 16 * 60;
+      const targetMin = startMin + (Math.abs(h) % (endMin - startMin));
+      const now = new Date();
+      const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(targetMin / 60), targetMin % 60);
+      if (now >= target) setPresenceModalOpen(true);
+    };
+    check();
+    const t = setInterval(check, 30000);
+    return () => clearInterval(t);
+  }, [status, user, openVisit, presenceModalOpen]);
+
+  async function handleConfirmPresence() {
+    if (presenceSending || !openVisit) return;
+    setPresenceSending(true);
+    setPresenceError("");
+    try {
+      await api.confirmPresence(openVisit.storeId);
+      localStorage.setItem(`presence_confirmed_${user.id}_${new Date().toLocaleDateString("en-CA")}`, "1");
+      setPresenceModalOpen(false);
+    } catch (e) {
+      setPresenceError(e instanceof ApiError ? e.message : "No hay conexión. Intenta de nuevo en un momento.");
+    } finally {
+      setPresenceSending(false);
+    }
+  }
+
+  // Se muestra en las 4 pantallas donde también vive FeedbackModal (dashboard,
+  // detalle de tienda, competencia, perfil) — es una alerta que debe alcanzar
+  // al promotor sin importar en qué pantalla esté.
+  const presenceModalNode = presenceModalOpen && (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(5,8,12,0.6)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 360, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 24, textAlign: "center" }}>
+        <div style={{ width: 52, height: 52, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
+          <Heart size={24} />
+        </div>
+        <h3 style={{ fontFamily: "Space Grotesk", fontSize: 17, fontWeight: 600, color: COLORS.text, margin: "0 0 8px" }}>¿Todo bien por allá?</h3>
+        <p style={{ fontSize: 13, color: COLORS.textMuted, lineHeight: 1.55, margin: "0 0 18px" }}>
+          Solo queremos confirmar que sigues en{openVisitStore ? ` ${openVisitStore.name}` : " tu punto de venta"}. Gracias por tu trabajo hoy.
+        </p>
+        {presenceError && <p style={{ color: COLORS.danger, fontSize: 12.5, margin: "0 0 12px" }}>{presenceError}</p>}
+        <button
+          onClick={handleConfirmPresence}
+          disabled={presenceSending}
+          style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontFamily: "Inter", fontWeight: 700, fontSize: 14.5, cursor: presenceSending ? "default" : "pointer", opacity: presenceSending ? 0.7 : 1 }}
+        >
+          {presenceSending ? "Enviando…" : "Aceptar"}
+        </button>
+      </div>
+    </div>
+  );
 
   // Reenvía al backend las acciones que se encolaron (cifradas) sin red.
   const flushQueue = useCallback(async () => {
@@ -1002,6 +1072,7 @@ export default function PromotoresApp() {
         <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} onHelp={onboarding.show} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {presenceModalNode}
         {onboarding.open && <OnboardingTour steps={ONBOARDING_STEPS_PROMOTOR} onClose={onboarding.dismiss} />}
         <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           {showCheckoutReminder && (
@@ -1094,6 +1165,7 @@ export default function PromotoresApp() {
         <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {presenceModalNode}
         <div style={{ padding: "18px 20px 40px", maxWidth: 460, margin: "0 auto" }}>
           <button onClick={() => setScreen("dashboard")} style={{ background: "none", border: "none", color: COLORS.textMuted, display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14 }}>
             <ArrowLeft size={15} /> Tiendas
@@ -1286,6 +1358,7 @@ export default function PromotoresApp() {
         <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {presenceModalNode}
         <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>COMPETENCIA</span>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: COLORS.text, margin: "2px 0 4px" }}>Reportar acción</h2>
@@ -1377,6 +1450,7 @@ export default function PromotoresApp() {
         <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {presenceModalNode}
         <div style={{ padding: "28px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           <div style={{ width: 64, height: 64, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, margin: "0 auto 12px" }}>
             {initials}

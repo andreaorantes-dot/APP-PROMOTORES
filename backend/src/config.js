@@ -81,6 +81,9 @@ export const config = {
     // Las fotos NO van aquí (ver CompetitionReport en la base de datos); esta
     // pestaña es solo un resumen para que el admin lo revise sin abrir la app.
     competenciaTab: process.env.GOOGLE_SHEETS_COMPETENCIA_TAB ?? "Competencia",
+    // Confirmaciones de "sigo en tienda" (alerta aleatoria 10am-4pm, solo
+    // promotores) — ver presenceSheet.js.
+    confirmacionTab: process.env.GOOGLE_SHEETS_CONFIRMACION_TAB ?? "Confirmación en tienda",
   },
 
   // --- Correo (reporte semanal para el admin) -------------------------------

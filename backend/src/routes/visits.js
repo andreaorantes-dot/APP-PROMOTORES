@@ -5,6 +5,7 @@ import { distanceMeters, isValidCoords } from "../geo.js";
 import { getStore, getVisit, fetchTodayVisits, submitVisitReport } from "../db.js";
 import { findPromoterById, notifyCheckIn, checkAndNotifyGoals, getMyGoalProgress } from "../db.js";
 import { appendVisitRow } from "../sheets.js";
+import { appendPresenceConfirmation } from "../presenceSheet.js";
 
 const router = Router();
 router.use(requireAuth); // todas las rutas de visitas exigen sesión válida
@@ -161,6 +162,37 @@ router.post("/:storeId/check-out", async (req, res) => {
     console.error(`[check-out] FALLÓ promotor=${req.promoter?.id} tienda=${req.params.storeId} status=${err?.status} code=${err?.code}:`, err?.message);
     if (err?.code === "P2002") return res.status(409).json({ message: "La visita ya fue registrada" });
     return res.status(err.status ?? 400).json({ message: err.message, distance: err.distance });
+  }
+});
+
+// POST /api/visits/:storeId/confirm-presence
+// Confirmación de "sigo en tienda" — la dispara el cliente una vez al día, en
+// un momento aleatorio entre 10am y 4pm, solo mientras el promotor tiene un
+// check-in abierto en esa tienda. No pide coordenadas ni las revalida contra
+// el radio: es un check de presencia liviano (¿sigues activo en la app?), no
+// una repetición del check-in geolocalizado.
+router.post("/:storeId/confirm-presence", async (req, res) => {
+  try {
+    const existing = await getVisit(req.promoter.id, req.params.storeId);
+    if (existing?.status !== "checked-in") {
+      return res.status(409).json({ message: "No tienes una visita abierta en esa tienda" });
+    }
+    const [promoter, store] = await Promise.all([
+      findPromoterById(req.promoter.id),
+      getStore(req.params.storeId),
+    ]);
+    await appendPresenceConfirmation({
+      promoterId: req.promoter.id,
+      promoterName: promoter?.name || req.promoter.id,
+      supervisor: promoter?.supervisor || "",
+      storeId: req.params.storeId,
+      storeName: store?.name || req.params.storeId,
+    });
+    console.log(`[confirm-presence] OK promotor=${req.promoter.id} tienda=${req.params.storeId}`);
+    return res.status(204).end();
+  } catch (err) {
+    console.error(`[confirm-presence] FALLÓ promotor=${req.promoter?.id} tienda=${req.params.storeId}:`, err?.message);
+    return res.status(err.status ?? 500).json({ message: err.message || "No se pudo guardar la confirmación" });
   }
 });
 
