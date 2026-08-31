@@ -335,7 +335,7 @@ function SalesGoals({ goal }) {
             <Trophy size={12} /> {level}
           </span>
         </div>
-        <GoalBar label="Rollos + cubetas (1 cubeta = 0.6)" actual={goal.achieved} meta={goal.target} />
+        <GoalBar label="Rollos + cubetas" actual={goal.achieved} meta={goal.target} />
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.successSoft, border: `1px solid ${COLORS.success}55`, borderRadius: 12, padding: "10px 12px", marginBottom: 14 }}>
         <Zap size={16} color={COLORS.success} style={{ flexShrink: 0, marginTop: 1 }} />
