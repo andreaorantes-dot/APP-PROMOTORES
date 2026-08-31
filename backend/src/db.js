@@ -213,12 +213,14 @@ export async function getManagerSummary(rangeKey = "today", { supervisorId, from
   // La agregación pura vive en managerSummary.js (testeable sin base de datos).
   const summary = summarizeVisitRows(rows, config.prices, range);
   await attachGoalProgress(summary);
-  // Total de la plantilla (todos los promotores registrados, o solo los de
-  // ESE supervisor) — a diferencia de `summary.promoters`, que solo incluye a
+  // Plantilla completa (todos los promotores registrados, o solo los de ESE
+  // supervisor) — a diferencia de `summary.promoters`, que solo incluye a
   // quien tuvo actividad en el rango. Con esto el tablero puede mostrar
-  // "cuántos faltan de estar en tienda" contra el total real, no solo contra
-  // los que ya hicieron algo hoy.
-  summary.totals.rosterTotal = await getRosterTotal(supervisorId);
+  // "cuántos faltan de estar en tienda" (y quiénes son) contra el total real,
+  // no solo contra los que ya hicieron algo hoy.
+  const roster = await getRoster(supervisorId);
+  summary.roster = roster.map((p) => ({ id: p.id, name: p.name, estado: p.estado ?? null }));
+  summary.totals.rosterTotal = roster.length;
   return summary;
 }
 
@@ -227,22 +229,23 @@ export async function getSupervisorSummary(supervisorId, rangeKey = "today", { f
   return getManagerSummary(rangeKey, { supervisorId, from, to });
 }
 
-// Cuántos promotores hay registrados en total (o bajo un supervisor dado),
-// sin importar si tuvieron actividad hoy. Con AUTH_SOURCE=sheet (el modo
-// real) lee el Sheet directo; si no, cuenta los promotores locales conocidos.
-async function getRosterTotal(supervisorId) {
+// TODOS los promotores registrados (o solo los de un supervisor dado),
+// { id, name, estado }, sin importar si tuvieron actividad hoy — para poder
+// mostrar la lista de "quién falta de estar en tienda" (roster completo menos
+// quien tiene check-in abierto ahora, ver summary.roster). Con AUTH_SOURCE=sheet
+// (el modo real) lee el Sheet directo; si no, los promotores locales conocidos.
+async function getRoster(supervisorId) {
   if (config.authSource === "sheet") {
     const all = await getAllPromotersFromSheet();
-    if (!supervisorId) return all.size;
-    let count = 0;
-    for (const p of all.values()) {
-      if ((p.supervisor || "").trim().toLowerCase() === supervisorId) count++;
-    }
-    return count;
+    const list = [...all.values()];
+    return supervisorId
+      ? list.filter((p) => (p.supervisor || "").trim().toLowerCase() === supervisorId)
+      : list;
   }
-  const all = await prisma.promoter.findMany({ select: { supervisor: true } });
-  if (!supervisorId) return all.length;
-  return all.filter((p) => (p.supervisor || "").trim().toLowerCase() === supervisorId).length;
+  const all = await prisma.promoter.findMany({ select: { id: true, name: true, supervisor: true, estado: true } });
+  return supervisorId
+    ? all.filter((p) => (p.supervisor || "").trim().toLowerCase() === supervisorId)
+    : all;
 }
 
 // --- Metas: progreso SEMANAL por promotor ------------------------------------
@@ -445,7 +448,6 @@ export async function getPromoterProfile(promoterId, limit = 200) {
       checkOutTime: v.checkOutTime,
       rollos: v.rollos,
       cubetas: v.cubetas,
-      galones: v.galones,
     })),
   };
 }

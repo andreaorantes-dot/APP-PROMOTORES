@@ -39,7 +39,7 @@ Promotor / Supervisor / Gerente-Admin
 
 | Rol | Pantalla | Ve |
 |---|---|---|
-| `promotor` | `PromotoresApp.jsx` | Sus tiendas cercanas, check-in/out con foto (rollos/cubetas/galones), su meta de ventas del mes, reporta competencia, su perfil, recuperar su contraseña |
+| `promotor` | `PromotoresApp.jsx` | Sus tiendas cercanas, check-in/out con foto (rollos/cubetas), su meta de ventas de la semana, reporta competencia, su perfil, recuperar su contraseña |
 | `supervisor` | `SupervisorDashboard.jsx` | Mapa + resumen **solo de SUS promotores** (los que tienen su nombre en la columna SUPERVISOR de la pestaña Promotores) |
 | `gerente` / `admin` | `ManagerDashboard.jsx` | Mapa + resumen **nacional**, puede fijar la meta de cualquier promotor, exporta CSV/Excel |
 
@@ -138,10 +138,10 @@ Todo vive en **un solo documento** ("BBDD Promotores"), con estas pestañas:
 | **Promotores** | ID, nombre, ubicación, supervisor, **estado** (uno de los 32 estados de México, fijo por promotor — alimenta el filtro de estado del gerente), contraseña (hash) de cada promotor | Login de promotores (`promotersSheet.js`); todos los tableros leen aquí el nombre de supervisor y el estado de cada promotor |
 | **Tiendas** | Catálogo global de tiendas (num, nombre, lat, lng, **estado**) | `storesSheet.js`, sincroniza a la BD local con `STORES_SOURCE=sheet` |
 | **Usuarios** | ID, nombre, rol (`admin`\|`gerente`\|`supervisor`), contraseña (hash) | Login de administración (`usersSheet.js`) — **nunca** promotores de campo |
-| **Metas** | Tipo (`promotor`\|`tienda`), ID, nombre, meta mensual en **unidades** (rollos+cubetas+galones) | `goalsSheet.js` — el botón "Meta" del tablero de admin **escribe** aquí |
+| **Metas** | Tipo (`promotor`\|`tienda`), ID, nombre, meta semanal en **unidades-equivalentes** (rollos + cubetas ponderadas, default 30/semana si no hay fila) | `goalsSheet.js` — el botón "Meta" del tablero de admin **escribe** aquí |
 | **Notificaciones** | Registro de check-in, meta de promotor/tienda alcanzada, solicitud de recuperación de contraseña, reporte semanal | `notificationsSheet.js` — se escribe sola desde el backend, nadie la edita a mano |
 | **Competencia** | Fila-resumen (fecha, promotor, marca, descripción, nº de fotos) de cada reporte | `competitionSheet.js` **escribe** aquí; el panel de revisión (`CompetenciaPanel.jsx`) **lee** de la base de datos, no de esta pestaña — las fotos NO están aquí, viven en `CompetitionReport` |
-| **Actividad Diaria** | Auditoría de cada check-out: entrada, salida, rollos, cubetas, **galones** (la escribe `sheets.js`) | Solo lectura en desarrollo local (`VISITS_SOURCE=sheet`); en producción el resumen del gerente usa la base de datos real, no esta pestaña |
+| **Actividad Diaria** | Auditoría de cada check-in/check-out: entrada, salida, rollos, cubetas (la escribe `sheets.js`) | Solo lectura en desarrollo local (`VISITS_SOURCE=sheet`); en producción el resumen del gerente usa la base de datos real, no esta pestaña |
 | **Retroalimentacion** | Reportes de "algo no funciona" desde la app del promotor **y** reportes de "comportamiento extraño" que admin/gerente/supervisor levantan desde el historial de un promotor (mismo formato, distinto `enviado_por`) | `sheets.js` (`appendFeedbackRow`) |
 
 Cómo se autentica el backend: un **Service Account** de Google Cloud, con el
@@ -151,8 +151,9 @@ documento compartido con su `client_email` como editor. Ver
 ## Base de datos (Prisma)
 
 Modelos en `backend/prisma/schema.prisma`: `Promoter`, `Store`, `VisitRecord`
-(rollos, cubetas, **galones**, con la foto del check-in en Base64),
-`CompetitionReport` (con sus fotos en Base64, JSON-array). Motor:
+(rollos, cubetas, con la foto del check-in en Base64 — la columna `galones`
+sigue en el esquema por compatibilidad con datos históricos, pero ya no se
+usa en ningún flujo), `CompetitionReport` (con sus fotos en Base64, JSON-array). Motor:
 
 - **Local:** SQLite (`backend/prisma/dev.db`).
 - **Render:** PostgreSQL (gestionado por Render, ver `render.yaml`).
@@ -181,9 +182,11 @@ npx prisma studio        # explorar los datos
 
 ## Metas de venta
 
-Mensuales, en **unidades** (rollos + cubetas + galones), no en dinero
-(decisión de producto). Sin fila en "Metas" = sin meta asignada (no se exige
-nada, no se generan notificaciones).
+Semanales, en **unidades-equivalentes de rollo** (1 rollo = 1 unidad, 1 cubeta
+= 0.6 unidades — así 30 rollos y 50 cubetas llegan al mismo default; los
+galones no cuentan), no en dinero (decisión de producto). Sin fila
+personalizada en "Metas" = usa el default automático (30/semana); una fila sí
+la reemplaza (`goalsSheet.js` → `DEFAULT_WEEKLY_GOAL_ROLLOS`, `goalUnits`).
 
 - **Ver:** todos los tableros calculan el avance del mes desde la base de
   datos real (`db.js` → `attachGoalProgress` / `getMyGoalProgress`).
@@ -327,7 +330,7 @@ Rutas bajo `VITE_API_BASE` (por defecto `/api`, mismo origen).
 | GET | `/stores?lat=&lng=` | promotor | Tiendas dentro de ~2 km (Haversine) |
 | GET | `/stores/all` | promotor | Catálogo completo (para el mapa de Inicio) |
 | POST | `/visits/:storeId/check-in` | promotor | `{ coords, photo }`. Foto obligatoria. |
-| POST | `/visits/:storeId/check-out` | promotor | `{ coords, rollos, cubetas, galones }`. Escribe la fila en Actividad Diaria + revisa metas. |
+| POST | `/visits/:storeId/check-out` | promotor | `{ coords, rollos, cubetas }`. Escribe la fila en Actividad Diaria + revisa metas. |
 | GET | `/visits/today` | promotor | Visitas de hoy del promotor logueado |
 | GET | `/visits/my-goal` | promotor | Su meta mensual y avance, o `null` |
 | POST | `/feedback` | promotor | Reporte de "algo no funciona" |

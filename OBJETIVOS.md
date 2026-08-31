@@ -59,10 +59,10 @@ sobre datos del día, no sobre reportes que llegan días después.
 
 - **Actividad**: check-in/out por tienda y por día (hora, ubicación validada,
   foto).
-- **Ventas**: rollos, cubetas y galones vendidos por visita, acumulados por
-  promotor y por tienda.
-- **Metas**: unidades vendidas (rollos+cubetas+galones) contra una meta
-  mensual, por promotor y por tienda.
+- **Ventas**: rollos y cubetas vendidos por visita, acumulados por promotor y
+  por tienda.
+- **Metas**: unidades-equivalentes vendidas (rollos + cubetas ponderadas)
+  contra una meta semanal, por promotor y por tienda.
 - **Inteligencia de competencia**: reportes cualitativos (marca, descripción,
   fotos) capturados por los propios promotores en campo, con un panel para
   que gerencia/supervisor los revise sin abrir el Sheet.

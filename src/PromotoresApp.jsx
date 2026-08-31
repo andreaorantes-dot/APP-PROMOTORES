@@ -420,7 +420,6 @@ export default function PromotoresApp() {
   const MAX_COMP_FOTOS = 5;
   const [rollos, setRollos] = useState(0);
   const [cubetas, setCubetas] = useState(0);
-  const [galones, setGalones] = useState(0);
   const [photo, setPhoto] = useState(null); // foto de check-in (Base64), obligatoria
   const [photoBusy, setPhotoBusy] = useState(false);
   const fileInputRef = useRef(null);
@@ -705,7 +704,6 @@ export default function PromotoresApp() {
     setSelectedStore(storeObj);
     setRollos(0);
     setCubetas(0);
-    setGalones(0);
     setPhoto(null);
     setGpsCoords(null);
     setGpsAccuracy(null);
@@ -799,22 +797,21 @@ export default function PromotoresApp() {
       checkOutDistance: Math.round(distance),
       rollos,
       cubetas,
-      galones,
     };
     try {
       if (!navigator.onLine) {
-        await queueOffline("check-out", { coords, rollos, cubetas, galones }, optimistic);
+        await queueOffline("check-out", { coords, rollos, cubetas }, optimistic);
         setShowSheet(false);
         return;
       }
-      const rec = await api.checkOut(store.id, { coords, rollos, cubetas, galones });
+      const rec = await api.checkOut(store.id, { coords, rollos, cubetas });
       await persistRecords({ ...records, [store.id]: rec });
       setShowSheet(false);
     } catch (e) {
       if (e instanceof ApiError) {
         alert(e.message || "No se pudo registrar la salida.");
       } else {
-        await queueOffline("check-out", { coords, rollos, cubetas, galones }, optimistic);
+        await queueOffline("check-out", { coords, rollos, cubetas }, optimistic);
         setShowSheet(false);
       }
     } finally {
@@ -1293,8 +1290,7 @@ export default function PromotoresApp() {
               <Row label="Salida" value={`${fmtTime(record.checkOutTime)}`} />
               <Row label="Duracion" value={fmtDuration(record.checkInTime, record.checkOutTime)} />
               <Row label="Rollos vendidos" value={record.rollos} />
-              <Row label="Cubetas vendidas" value={record.cubetas} />
-              <Row label="Galones vendidos" value={record.galones} last />
+              <Row label="Cubetas vendidas" value={record.cubetas} last />
               <button
                 onClick={() => setScreen("dashboard")}
                 style={{ width: "100%", marginTop: 18, padding: "12px 0", borderRadius: 10, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
@@ -1314,7 +1310,6 @@ export default function PromotoresApp() {
 
               <Stepper label="Rollos" value={rollos} onChange={setRollos} />
               <Stepper label="Cubetas" value={cubetas} onChange={setCubetas} />
-              <Stepper label="Galones" value={galones} onChange={setGalones} />
 
               {/* Aviso informativo (no bloquea): el servidor valida la distancia real. */}
               {gpsCoords && !inRange && (
@@ -1494,7 +1489,7 @@ export default function PromotoresApp() {
                       </div>
                     </div>
                     <div style={{ textAlign: "right", flexShrink: 0, color: COLORS.accentText, fontFamily: "JetBrains Mono", fontWeight: 800, fontSize: 13 }}>
-                      {v.rollos}R · {v.cubetas}C · {v.galones}G
+                      {v.rollos}R · {v.cubetas}C
                     </div>
                   </div>
                 ))

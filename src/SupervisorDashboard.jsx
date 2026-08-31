@@ -89,7 +89,7 @@ export default function SupervisorDashboard() {
   // Fechas del rango "Personalizado…" (YYYY-MM-DD, del <input type="date">).
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  // Rollos/cubetas/galones: multi-select (no excluyentes) — ver ManagerDashboard.
+  // Rollos/cubetas: multi-select (no excluyentes) — ver ManagerDashboard.
   const [unitFilter, setUnitFilter] = useState(() => new Set());
   const toggleUnit = (u) => setUnitFilter((prev) => {
     const next = new Set(prev);
@@ -120,7 +120,7 @@ export default function SupervisorDashboard() {
   }, [load]);
 
   const promoters = summary?.promoters ?? [];
-  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, galones: 0, money: 0, checkedIn: 0, withoutSales: 0, rosterTotal: 0 };
+  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, money: 0, checkedIn: 0, withoutSales: 0, rosterTotal: 0 };
   const prices = summary?.prices ?? { rollo: 0, cubeta: 0 };
   const useMoney = totals.money > 0;
   // "En su lugar" = con check-in abierto AHORA MISMO, contra el total de
@@ -132,11 +132,25 @@ export default function SupervisorDashboard() {
   // que tengan actividad en el rango actual) — igual que ManagerDashboard.
   const estados = MEXICO_ESTADOS;
 
+  // Promotores de tu equipo SIN check-in abierto ahora mismo — para el
+  // listado que abre el KPI "Faltan en tienda". Ver ManagerDashboard.
+  const missingPromoters = useMemo(() => {
+    const checkedInIds = new Set(promoters.filter((p) => p.status === "in").map((p) => p.id));
+    return (summary?.roster ?? [])
+      .filter((r) => !checkedInIds.has(r.id))
+      .map((r) => ({
+        id: r.id, name: r.name, estado: r.estado, supervisor: null,
+        rollos: 0, cubetas: 0, money: 0, status: "missing",
+        checkInTime: null, checkOutTime: null, goal: null,
+        lat: null, lng: null, visits: [],
+      }));
+  }, [promoters, summary]);
+
   const filtered = useMemo(() => {
-    let list = promoters;
+    let list = segment === "faltantes" ? missingPromoters : promoters;
     if (estado !== "todos") list = list.filter((p) => (p.estado || "Sin estado") === estado);
-    if (segment === "con") list = list.filter((p) => p.rollos + p.cubetas + p.galones > 0);
-    else if (segment === "sin") list = list.filter((p) => p.rollos + p.cubetas + p.galones === 0);
+    if (segment === "con") list = list.filter((p) => p.rollos + p.cubetas > 0);
+    else if (segment === "sin") list = list.filter((p) => p.rollos + p.cubetas === 0);
     else if (segment === "meta") list = list.filter((p) => p.goal?.reached);
     else if (segment === "in") list = list.filter((p) => p.status === "in");
     if (unitFilter.size > 0) list = list.filter((p) => [...unitFilter].some((u) => p[u] > 0));
@@ -145,13 +159,13 @@ export default function SupervisorDashboard() {
       list = list.filter((p) => (p.name || "").toLowerCase().includes(q) || String(p.id).includes(q));
     }
     return list;
-  }, [promoters, estado, segment, query, unitFilter]);
+  }, [promoters, missingPromoters, estado, segment, query, unitFilter]);
 
   const metric = unitFilter.size > 0
     ? (p) => [...unitFilter].reduce((sum, u) => sum + (p[u] || 0), 0)
-    : (p) => (useMoney ? p.money : p.rollos + p.cubetas + p.galones);
+    : (p) => (useMoney ? p.money : p.rollos + p.cubetas);
   const metricFmt = unitFilter.size > 0 ? fmtNum : (useMoney ? fmtMoney : fmtNum);
-  const UNIT_LABELS = { rollos: "rollos", cubetas: "cubetas", galones: "galones" };
+  const UNIT_LABELS = { rollos: "rollos", cubetas: "cubetas" };
   const unitLabel = unitFilter.size > 0
     ? [...unitFilter].map((u) => UNIT_LABELS[u]).join(" + ")
     : (useMoney ? "dinero" : "unidades");
@@ -175,7 +189,6 @@ export default function SupervisorDashboard() {
     : [
         { label: "Rollos", value: totals.rollos },
         { label: "Cubetas", value: totals.cubetas },
-        { label: "Galones", value: totals.galones },
       ];
   const metasAlcanzadas = promoters.filter((p) => p.goal?.reached).length;
 
@@ -279,18 +292,13 @@ export default function SupervisorDashboard() {
         />
         <Kpi
           icon={TrendingUp} label="Rollos" value={fmtNum(totals.rollos)}
-          tooltip="Total de rollos vendidos por tu equipo en este período. Clic para filtrar — puedes combinarlo con cubetas/galones."
+          tooltip="Total de rollos vendidos por tu equipo en este período. Clic para filtrar — puedes combinarlo con cubetas."
           onClick={() => toggleUnit("rollos")} active={unitFilter.has("rollos")}
         />
         <Kpi
           icon={TrendingUp} label="Cubetas" value={fmtNum(totals.cubetas)}
-          tooltip="Total de cubetas vendidas por tu equipo en este período. Clic para filtrar — puedes combinarlo con rollos/galones."
+          tooltip="Total de cubetas vendidas por tu equipo en este período. Clic para filtrar — puedes combinarlo con rollos."
           onClick={() => toggleUnit("cubetas")} active={unitFilter.has("cubetas")}
-        />
-        <Kpi
-          icon={TrendingUp} label="Galones" value={fmtNum(totals.galones)}
-          tooltip="Total de galones vendidos por tu equipo en este período. Clic para filtrar — puedes combinarlo con rollos/cubetas."
-          onClick={() => toggleUnit("galones")} active={unitFilter.has("galones")}
         />
         <Kpi
           icon={Users} label="Mi equipo activo" value={fmtNum(totals.promoters)}
@@ -314,8 +322,8 @@ export default function SupervisorDashboard() {
         />
         <Kpi
           icon={UserX} label="Faltan en tienda" value={fmtNum(faltanEnTienda)}
-          tooltip="Promotores de tu equipo que AHORA MISMO no tienen un check-in abierto (sobre el total de tu equipo, no solo los activos en este período)."
-          onClick={() => setSegment("in")}
+          tooltip="Promotores de tu equipo que AHORA MISMO no tienen un check-in abierto (sobre el total de tu equipo, no solo los activos en este período). Clic para ver quiénes son."
+          onClick={() => setSegment("faltantes")} active={segment === "faltantes"}
         />
         <Kpi
           icon={UserCheck} label="% en su lugar" value={`${pctEnTienda}%`}
@@ -343,9 +351,9 @@ export default function SupervisorDashboard() {
             isDesktop={isDesktop}
             panelMode={panelMode}
             count={filtered.length}
-            total={promoters.length}
-            icon={Users}
-            title="Mis promotores"
+            total={segment === "faltantes" ? missingPromoters.length : promoters.length}
+            icon={segment === "faltantes" ? UserX : Users}
+            title={segment === "faltantes" ? "Promotores faltantes" : "Mis promotores"}
             onToggleCollapse={cyclePrimary}
             onToggleMax={() => setPanelMode((m) => (m === "max" ? "open" : "max"))}
           />

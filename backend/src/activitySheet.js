@@ -21,10 +21,10 @@
 // Las columnas se leen por POSICIÓN, no por el texto del encabezado: deben
 // coincidir exactamente con el orden que escribe appendVisitRow en sheets.js
 // (registrado_en, id_promotor, nombre, tienda, hora_entrada, hora_salida,
-// rollos, cubetas, galones). Los encabezados visibles en el Sheet pueden decir
-// otra cosa (quedaron de un diseño anterior); no se usan para parsear. Las
-// filas escritas ANTES de agregar "galones" simplemente no tienen esa novena
-// columna — Number(undefined) da 0, así que se leen igual sin romperse.
+// rollos, cubetas). Los encabezados visibles en el Sheet pueden decir otra
+// cosa (quedaron de un diseño anterior); no se usan para parsear. Las filas
+// viejas que sí tenían una novena columna ("galones", ya no se usa) se leen
+// igual de bien: esa posición extra simplemente se ignora.
 import { existsSync, readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { config } from "./config.js";
@@ -95,7 +95,7 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
 
   // Fila 0 es el encabezado; los datos empiezan en la fila 1.
   for (let r = 1; r < rows.length; r++) {
-    const [registradoEn, promoterId, promoterName, storeName, horaEntrada, horaSalida, rollosRaw, cubetasRaw, galonesRaw] = rows[r] || [];
+    const [registradoEn, promoterId, promoterName, storeName, horaEntrada, horaSalida, rollosRaw, cubetasRaw] = rows[r] || [];
     if (!promoterId || !storeName) continue; // fila vacía/incompleta
 
     // registrado_en/hora_entrada/hora_salida pueden venir en dos formatos:
@@ -129,7 +129,6 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
       status: checkOutDate ? "checked-out" : "checked-in",
       rollos: Number(rollosRaw) || 0,
       cubetas: Number(cubetasRaw) || 0,
-      galones: Number(galonesRaw) || 0,
       checkInTime: checkInDate.toISOString(),
       checkOutTime: checkOutDate ? checkOutDate.toISOString() : null,
     };

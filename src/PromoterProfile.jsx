@@ -68,7 +68,7 @@ function VisitRow({ v, promoterId, reportKey, reporting, onToggleReport, onSent 
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           <div style={{ textAlign: "right", color: COLORS.text, fontFamily: "JetBrains Mono", fontWeight: 700 }}>
-            {fmtNum(v.rollos)}R · {fmtNum(v.cubetas)}C · {fmtNum(v.galones)}G
+            {fmtNum(v.rollos)}R · {fmtNum(v.cubetas)}C
           </div>
           <button
             onClick={() => onToggleReport(reportKey)}

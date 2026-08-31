@@ -100,8 +100,8 @@ export default function ManagerDashboard() {
   const [segment, setSegment] = useState("todos"); // todos | con | sin | top
   const [estado, setEstado] = useState("todos");
   const [query, setQuery] = useState("");
-  // Rollos/cubetas/galones: NO son excluyentes entre sí — se pueden marcar
-  // una o varias a la vez (clic en el KPI la prende/apaga). Con al menos una
+  // Rollos/cubetas: NO son excluyentes entre sí — se pueden marcar una o
+  // ambas a la vez (clic en el KPI la prende/apaga). Con al menos una
   // marcada, filtran el mapa/listado a quien vendió en CUALQUIERA de las
   // seleccionadas, y las gráficas de abajo (Top vendedores, Ventas por
   // estado) cambian a sumar solo esas unidades en vez del dinero/total.
@@ -155,7 +155,7 @@ export default function ManagerDashboard() {
   }
 
   const promoters = summary?.promoters ?? [];
-  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, galones: 0, money: 0, checkedIn: 0, withoutSales: 0, rosterTotal: 0 };
+  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, money: 0, checkedIn: 0, withoutSales: 0, rosterTotal: 0 };
   const prices = summary?.prices ?? { rollo: 0, cubeta: 0 };
   const useMoney = totals.money > 0;
   // "En su lugar" = con check-in abierto AHORA MISMO, contra el total de
@@ -167,11 +167,27 @@ export default function ManagerDashboard() {
   // que tengan actividad en el rango actual).
   const estados = MEXICO_ESTADOS;
 
+  // Promotores de la plantilla SIN check-in abierto ahora mismo — para el
+  // listado que abre el KPI "Faltan en tienda". No tienen visita que mostrar
+  // (rollos/cubetas/dinero en 0, sin coordenadas), a diferencia de
+  // `promoters` (que solo trae a quien tuvo actividad en el rango).
+  const missingPromoters = useMemo(() => {
+    const checkedInIds = new Set(promoters.filter((p) => p.status === "in").map((p) => p.id));
+    return (summary?.roster ?? [])
+      .filter((r) => !checkedInIds.has(r.id))
+      .map((r) => ({
+        id: r.id, name: r.name, estado: r.estado, supervisor: null,
+        rollos: 0, cubetas: 0, money: 0, status: "missing",
+        checkInTime: null, checkOutTime: null, goal: null,
+        lat: null, lng: null, visits: [],
+      }));
+  }, [promoters, summary]);
+
   const filtered = useMemo(() => {
-    let list = promoters;
+    let list = segment === "faltantes" ? missingPromoters : promoters;
     if (estado !== "todos") list = list.filter((p) => (p.estado || "Sin estado") === estado);
-    if (segment === "con") list = list.filter((p) => p.rollos + p.cubetas + p.galones > 0);
-    else if (segment === "sin") list = list.filter((p) => p.rollos + p.cubetas + p.galones === 0);
+    if (segment === "con") list = list.filter((p) => p.rollos + p.cubetas > 0);
+    else if (segment === "sin") list = list.filter((p) => p.rollos + p.cubetas === 0);
     else if (segment === "in") list = list.filter((p) => p.status === "in");
     if (unitFilter.size > 0) list = list.filter((p) => [...unitFilter].some((u) => p[u] > 0));
     if (query.trim()) {
@@ -181,16 +197,16 @@ export default function ManagerDashboard() {
     // Nota: el backend ya ordena por dinero desc. Para "top" recortamos a 5.
     if (segment === "top") list = [...list].sort((a, b) => b.money - a.money).slice(0, 5);
     return list;
-  }, [promoters, estado, segment, query, unitFilter]);
+  }, [promoters, missingPromoters, estado, segment, query, unitFilter]);
 
   // Datos para gráficas: por dinero si hay precios (y no hay unidad
-  // específica marcada); si se marcó rollos/cubetas/galones, suma SOLO esas;
+  // específica marcada); si se marcó rollos/cubetas, suma SOLO esas;
   // si no, cae a unidades totales.
   const metric = unitFilter.size > 0
     ? (p) => [...unitFilter].reduce((sum, u) => sum + (p[u] || 0), 0)
-    : (p) => (useMoney ? p.money : p.rollos + p.cubetas + p.galones);
+    : (p) => (useMoney ? p.money : p.rollos + p.cubetas);
   const metricFmt = unitFilter.size > 0 ? fmtNum : (useMoney ? fmtMoney : fmtNum);
-  const UNIT_LABELS = { rollos: "rollos", cubetas: "cubetas", galones: "galones" };
+  const UNIT_LABELS = { rollos: "rollos", cubetas: "cubetas" };
   const unitLabel = unitFilter.size > 0
     ? [...unitFilter].map((u) => UNIT_LABELS[u]).join(" + ")
     : (useMoney ? "dinero" : "unidades");
@@ -214,7 +230,6 @@ export default function ManagerDashboard() {
     : [
         { label: "Rollos", value: totals.rollos },
         { label: "Cubetas", value: totals.cubetas },
-        { label: "Galones", value: totals.galones },
       ];
 
   const segments = [
@@ -324,18 +339,13 @@ export default function ManagerDashboard() {
         />
         <Kpi
           icon={TrendingUp} label="Rollos" value={fmtNum(totals.rollos)}
-          tooltip="Total de rollos vendidos en este período. Clic para filtrar el mapa y las gráficas a quien vendió rollos — puedes combinarlo con cubetas/galones."
+          tooltip="Total de rollos vendidos en este período. Clic para filtrar el mapa y las gráficas a quien vendió rollos — puedes combinarlo con cubetas."
           onClick={() => toggleUnit("rollos")} active={unitFilter.has("rollos")}
         />
         <Kpi
           icon={TrendingUp} label="Cubetas" value={fmtNum(totals.cubetas)}
-          tooltip="Total de cubetas vendidas en este período. Clic para filtrar el mapa y las gráficas a quien vendió cubetas — puedes combinarlo con rollos/galones."
+          tooltip="Total de cubetas vendidas en este período. Clic para filtrar el mapa y las gráficas a quien vendió cubetas — puedes combinarlo con rollos."
           onClick={() => toggleUnit("cubetas")} active={unitFilter.has("cubetas")}
-        />
-        <Kpi
-          icon={TrendingUp} label="Galones" value={fmtNum(totals.galones)}
-          tooltip="Total de galones vendidos en este período. Clic para filtrar el mapa y las gráficas a quien vendió galones — puedes combinarlo con rollos/cubetas."
-          onClick={() => toggleUnit("galones")} active={unitFilter.has("galones")}
         />
         <Kpi
           icon={Users} label="Activos" value={fmtNum(totals.promoters)}
@@ -359,8 +369,8 @@ export default function ManagerDashboard() {
         />
         <Kpi
           icon={UserX} label="Faltan en tienda" value={fmtNum(faltanEnTienda)}
-          tooltip="Promotores registrados que AHORA MISMO no tienen un check-in abierto (sobre el total de la plantilla, no solo los activos en este período)."
-          onClick={() => setSegment("in")}
+          tooltip="Promotores registrados que AHORA MISMO no tienen un check-in abierto (sobre el total de la plantilla, no solo los activos en este período). Clic para ver quiénes son."
+          onClick={() => setSegment("faltantes")} active={segment === "faltantes"}
         />
         <Kpi
           icon={UserCheck} label="% en su lugar" value={`${pctEnTienda}%`}
@@ -388,8 +398,9 @@ export default function ManagerDashboard() {
             isDesktop={isDesktop}
             panelMode={panelMode}
             count={filtered.length}
-            total={promoters.length}
-            icon={Users}
+            total={segment === "faltantes" ? missingPromoters.length : promoters.length}
+            icon={segment === "faltantes" ? UserX : Users}
+            title={segment === "faltantes" ? "Promotores faltantes" : "Promotores activos"}
             onToggleCollapse={cyclePrimary}
             onToggleMax={() => setPanelMode((m) => (m === "max" ? "open" : "max"))}
           />

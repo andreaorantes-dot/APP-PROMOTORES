@@ -29,7 +29,6 @@ const HEADERS = [
   "hora_salida",
   "rollos",
   "cubetas",
-  "galones",
 ];
  
 // Encabezados de la pestaña de retroalimentación (reportes de error de los
@@ -81,7 +80,7 @@ async function getSheetsClient() {
  
 // Escribe la fila de encabezados si la pestaña está vacía, o la completa si le
 // faltan columnas al final (p. ej. una pestaña de producción creada antes de
-// agregar "galones" — así no queda una columna de datos sin encabezado).
+// agregar una columna nueva — así no queda una columna de datos sin encabezado).
 async function ensureHeader(sheets) {
   if (headerEnsured) return;
   const res = await sheets.spreadsheets.values.get({
@@ -178,7 +177,7 @@ export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripc
 // primero — se disparan en paralelo (ver routes/visits.js). Best-effort:
 // nunca lanza hacia el caller (registra el error y sigue), para no afectar al
 // check-in/check-out del promotor.
-export async function appendVisitRow({ promoter, store, storeId, checkInTime, checkOutTime, rollos, cubetas, galones }) {
+export async function appendVisitRow({ promoter, store, storeId, checkInTime, checkOutTime, rollos, cubetas }) {
   if (!isConfigured()) {
     console.warn("[sheets] Integración no configurada (faltan credenciales o spreadsheetId); se omite.");
     return { skipped: true };
@@ -195,7 +194,6 @@ export async function appendVisitRow({ promoter, store, storeId, checkInTime, ch
       checkOutTime ? formatMexicoDateTime(checkOutTime) : "0", // Hora salida: "0" = check-in todavía abierto
       rollos ?? 0, // Inventario: rollos
       cubetas ?? 0, // Inventario: cubetas
-      galones ?? 0, // Inventario: galones
     ];
     await sheets.spreadsheets.values.append({
       spreadsheetId: config.sheets.spreadsheetId,

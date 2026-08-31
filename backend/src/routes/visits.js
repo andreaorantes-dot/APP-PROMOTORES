@@ -114,7 +114,7 @@ router.post("/:storeId/check-in", async (req, res) => {
     const sheetWrite = appendVisitRow({
       promoter, store, storeId: req.params.storeId,
       checkInTime, checkOutTime: null,
-      rollos: 0, cubetas: 0, galones: 0,
+      rollos: 0, cubetas: 0,
     }).then((result) => {
       if (result?.error) console.error("[check-in] Falló el registro en Sheets:", result.error);
       else console.log(`[check-in] OK en Sheet promotor=${req.promoter.id} tienda=${req.params.storeId}`);
@@ -138,10 +138,10 @@ router.post("/:storeId/check-in", async (req, res) => {
   }
 });
 
-// POST /api/visits/:storeId/check-out  { coords, rollos, cubetas, galones }
+// POST /api/visits/:storeId/check-out  { coords, rollos, cubetas }
 router.post("/:storeId/check-out", async (req, res) => {
   try {
-    const { coords, rollos, cubetas, galones } = req.body ?? {};
+    const { coords, rollos, cubetas } = req.body ?? {};
     const { store, distance } = await assertInRange(req.promoter.id, req.params.storeId, coords);
 
     const existing = await getVisit(req.promoter.id, req.params.storeId);
@@ -153,7 +153,6 @@ router.post("/:storeId/check-out", async (req, res) => {
     const checkOutTime = new Date().toISOString();
     const rollosNum = Math.max(0, Number(rollos) || 0);
     const cubetasNum = Math.max(0, Number(cubetas) || 0);
-    const galonesNum = Math.max(0, Number(galones) || 0);
 
     // Postgres y el Sheet en PARALELO, igual que en el check-in. La fila del
     // Sheet REPITE checkInTime (de la visita ya abierta) para que, ella sola,
@@ -164,12 +163,11 @@ router.post("/:storeId/check-out", async (req, res) => {
       checkOutDistance: distance,
       rollos: rollosNum,
       cubetas: cubetasNum,
-      galones: galonesNum,
     });
     const sheetWrite = appendVisitRow({
       promoter, store, storeId: req.params.storeId,
       checkInTime: existing.checkInTime, checkOutTime,
-      rollos: rollosNum, cubetas: cubetasNum, galones: galonesNum,
+      rollos: rollosNum, cubetas: cubetasNum,
     }).then((result) => {
       if (result?.error) console.error("[check-out] Falló el registro en Sheets:", result.error);
       else console.log(`[check-out] OK en Sheet promotor=${req.promoter.id} tienda=${req.params.storeId}`);

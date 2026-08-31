@@ -65,7 +65,7 @@ export const MEXICO_ESTADOS = [
 // Color del marcador/estado según ventas: verde si vendió, ámbar si está activo
 // pero aún sin ventas.
 export function salesColor(p) {
-  return p.rollos + p.cubetas + p.galones > 0 ? COLORS.success : COLORS.accent;
+  return p.rollos + p.cubetas > 0 ? COLORS.success : COLORS.accent;
 }
 
 // Fondo de textura de marca (igual que en la app del promotor).
@@ -151,7 +151,7 @@ export function NationalMap({ promoters, onSelect }) {
       const popup = `<div style="font-family:Inter,system-ui;min-width:150px">
         <div style="font-weight:700;margin-bottom:2px">${p.name}</div>
         <div style="color:#666;font-size:12px;margin-bottom:6px">${p.estado || "Sin estado"} · ${p.status === "in" ? "En tienda" : "Cerró visitas"}</div>
-        <div style="font-size:12px">Rollos: <b>${fmtNum(p.rollos)}</b> · Cubetas: <b>${fmtNum(p.cubetas)}</b> · Galones: <b>${fmtNum(p.galones)}</b></div>
+        <div style="font-size:12px">Rollos: <b>${fmtNum(p.rollos)}</b> · Cubetas: <b>${fmtNum(p.cubetas)}</b></div>
         <div style="font-size:12px;margin-top:2px">Vendido: <b>${fmtMoney(p.money)}</b></div>
       </div>`;
       const marker = L.marker([p.lat, p.lng], { icon }).bindPopup(popup).addTo(layer);
@@ -280,7 +280,7 @@ export function PromoterRow({ p, onClick, onEditGoal }) {
         <div style={{ width: 38, height: 38, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 800 }}>
           {initials}
         </div>
-        <span style={{ position: "absolute", right: -1, bottom: -1, width: 12, height: 12, borderRadius: "50%", background: color, border: `2px solid ${COLORS.surface}` }} title={p.rollos + p.cubetas + p.galones > 0 ? "Con ventas" : "Sin ventas"} />
+        <span style={{ position: "absolute", right: -1, bottom: -1, width: 12, height: 12, borderRadius: "50%", background: color, border: `2px solid ${COLORS.surface}` }} title={p.rollos + p.cubetas > 0 ? "Con ventas" : "Sin ventas"} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -296,15 +296,16 @@ export function PromoterRow({ p, onClick, onEditGoal }) {
           )}
         </div>
         <div style={{ fontSize: 11.5, color: COLORS.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {p.estado || "Sin estado"} · {p.status === "in" ? "En tienda" : "Cerró"} · entró {fmtTime(p.checkInTime)} · salió {fmtTime(p.checkOutTime)}
+          {p.status === "missing"
+            ? `${p.estado || "Sin estado"} · Sin visita hoy`
+            : `${p.estado || "Sin estado"} · ${p.status === "in" ? "En tienda" : "Cerró"} · entró ${fmtTime(p.checkInTime)} · salió ${fmtTime(p.checkOutTime)}`}
         </div>
         <div style={{ fontSize: 13, fontWeight: 800, color: COLORS.accentText, fontFamily: "JetBrains Mono", marginTop: 2 }}>{fmtMoney(p.money)}</div>
         <GoalBar goal={p.goal} />
       </div>
-      <div style={{ display: "flex", gap: 6, width: 174, flexShrink: 0 }}>
+      <div style={{ display: "flex", gap: 6, width: 116, flexShrink: 0 }}>
         <CountBox label="Rollos" value={p.rollos} />
         <CountBox label="Cubetas" value={p.cubetas} />
-        <CountBox label="Galones" value={p.galones} />
       </div>
     </div>
   );
@@ -366,7 +367,7 @@ export function EditGoalModal({ promoter, onSave, onClose, saving }) {
 }
 
 // --- Exportación CSV / Excel -------------------------------------------------
-export const EXPORT_HEADERS = ["ID", "Promotor", "Supervisor", "Estado", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Galones", "Dinero"];
+export const EXPORT_HEADERS = ["ID", "Promotor", "Supervisor", "Estado", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Dinero"];
 
 export function buildExportRows(promoters) {
   return promoters.flatMap((p) =>
@@ -374,14 +375,16 @@ export function buildExportRows(promoters) {
       id: p.id,
       promotor: p.name,
       supervisor: p.supervisor || "Sin supervisor",
-      estado: v.estado || "Sin estado",
+      // Estado DEL PROMOTOR (columna "Estado" de la pestaña Promotores, fijo
+      // por promotor) — no el de la tienda visitada (v.estado), a propósito:
+      // mismo criterio que el filtro de estado del tablero.
+      estado: p.estado || "Sin estado",
       tienda: v.storeName,
       dia: v.day || "",
       entrada: fmtDateTime(v.checkInTime),
       salida: fmtDateTime(v.checkOutTime),
       rollos: v.rollos,
       cubetas: v.cubetas,
-      galones: v.galones,
       dinero: v.money,
     }))
   );
@@ -406,7 +409,7 @@ export function downloadCsv(rows, filename) {
   };
   const lines = [EXPORT_HEADERS.join(",")];
   for (const r of rows) {
-    lines.push([r.id, r.promotor, r.supervisor, r.estado, r.tienda, r.dia, r.entrada, r.salida, r.rollos, r.cubetas, r.galones, r.dinero].map(escape).join(","));
+    lines.push([r.id, r.promotor, r.supervisor, r.estado, r.tienda, r.dia, r.entrada, r.salida, r.rollos, r.cubetas, r.dinero].map(escape).join(","));
   }
   // BOM al inicio: para que Excel detecte UTF-8 y no rompa los acentos/ñ.
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
@@ -420,7 +423,7 @@ export async function downloadXlsx(rows, filename) {
   const XLSX = await import("xlsx");
   const data = rows.map((r) => ({
     ID: r.id, Promotor: r.promotor, Supervisor: r.supervisor, Estado: r.estado, Tienda: r.tienda, Día: r.dia,
-    Entrada: r.entrada, Salida: r.salida, Rollos: r.rollos, Cubetas: r.cubetas, Galones: r.galones, Dinero: r.dinero,
+    Entrada: r.entrada, Salida: r.salida, Rollos: r.rollos, Cubetas: r.cubetas, Dinero: r.dinero,
   }));
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();

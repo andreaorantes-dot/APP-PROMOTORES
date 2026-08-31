@@ -33,9 +33,9 @@ function useMoney(summary) {
 function summaryLine(summary, label) {
   const t = summary.totals;
   const money = useMoney(summary);
-  const monto = money ? fmtMoney(t.money) : `${fmtNum(t.rollos + t.cubetas + t.galones)} unidades`;
+  const monto = money ? fmtMoney(t.money) : `${fmtNum(t.rollos + t.cubetas)} unidades`;
   const top = summary.promoters[0];
-  const topText = top ? ` Top: ${top.name} (${money ? fmtMoney(top.money) : `${fmtNum(top.rollos + top.cubetas + top.galones)} u.`}).` : "";
+  const topText = top ? ` Top: ${top.name} (${money ? fmtMoney(top.money) : `${fmtNum(top.rollos + top.cubetas)} u.`}).` : "";
   return `Resumen semanal${label ? ` de ${label}` : ""}: ${monto} vendido · ${t.promoters} activos · ${t.withoutSales} sin ventas · ${t.storesVisited} tiendas.${topText}`;
 }
 
@@ -45,12 +45,12 @@ function summaryHtml(summary, title) {
   const money = useMoney(summary);
   const rows = summary.promoters
     .slice(0, 15)
-    .map((p) => `<tr><td>${p.name}</td><td align="right">${fmtNum(p.rollos + p.cubetas + p.galones)}</td><td align="right">${money ? fmtMoney(p.money) : "—"}</td></tr>`)
+    .map((p) => `<tr><td>${p.name}</td><td align="right">${fmtNum(p.rollos + p.cubetas)}</td><td align="right">${money ? fmtMoney(p.money) : "—"}</td></tr>`)
     .join("");
   return `
     <h2 style="font-family:sans-serif">${title}</h2>
     <p style="font-family:sans-serif">
-      <b>Vendido:</b> ${money ? fmtMoney(t.money) : `${fmtNum(t.rollos + t.cubetas + t.galones)} unidades`} ·
+      <b>Vendido:</b> ${money ? fmtMoney(t.money) : `${fmtNum(t.rollos + t.cubetas)} unidades`} ·
       <b>Activos:</b> ${t.promoters} · <b>Sin ventas:</b> ${t.withoutSales} ·
       <b>Tiendas visitadas:</b> ${t.storesVisited}
     </p>

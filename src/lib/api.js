@@ -121,10 +121,10 @@ export const api = {
       body: { coords, photo },
     }),
 
-  checkOut: (storeId, { coords, rollos, cubetas, galones }) =>
+  checkOut: (storeId, { coords, rollos, cubetas }) =>
     request(`/visits/${encodeURIComponent(storeId)}/check-out`, {
       method: "POST",
-      body: { coords, rollos, cubetas, galones },
+      body: { coords, rollos, cubetas },
     }),
 
   // Today's visit records for the signed-in promoter.
