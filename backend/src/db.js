@@ -10,8 +10,8 @@ import { findPromoterInSheet, getAllPromotersFromSheet } from "./promotersSheet.
 import { ensureStoresSynced } from "./storesSheet.js";
 import { summarizeVisitRows } from "./managerSummary.js";
 import { fetchVisitRowsFromSheet } from "./activitySheet.js";
-import { todayKey, resolveRange } from "./businessDay.js";
-import { getPromoterGoal, getStoreGoal, setPromoterGoal as setPromoterGoalInSheet } from "./goalsSheet.js";
+import { todayKey, resolveRange, formatMexicoDateTime } from "./businessDay.js";
+import { getPromoterGoal, getStoreGoal, setPromoterGoal as setPromoterGoalInSheet, DEFAULT_WEEKLY_GOAL_ROLLOS, goalUnits } from "./goalsSheet.js";
 import { appendNotification, hasGoalNotification } from "./notificationsSheet.js";
 import { appendCompetitionRow } from "./competitionSheet.js";
 
@@ -172,11 +172,11 @@ export async function getCompetitionReports({ supervisorId, limit = 200 } = {}) 
 // supervisor (comparando, sin distinguir mayúsculas, contra la columna
 // SUPERVISOR de la pestaña Promotores) — así el tablero de supervisor
 // reutiliza exactamente la misma agregación que el del gerente.
-export async function getManagerSummary(rangeKey = "today", { supervisorId } = {}) {
+export async function getManagerSummary(rangeKey = "today", { supervisorId, from, to } = {}) {
   // Asegura que las tiendas (con su ESTADO) estén sincronizadas desde el Sheet.
   if (config.storesSource === "sheet") await ensureStoresSynced();
 
-  const range = resolveRange(rangeKey);
+  const range = resolveRange(rangeKey, { from, to });
 
   // Con VISITS_SOURCE=sheet (solo para desarrollo local) reconstruimos las
   // visitas del rango desde la pestaña de auditoría del Sheet, porque la base
@@ -213,47 +213,102 @@ export async function getManagerSummary(rangeKey = "today", { supervisorId } = {
   // La agregación pura vive en managerSummary.js (testeable sin base de datos).
   const summary = summarizeVisitRows(rows, config.prices, range);
   await attachGoalProgress(summary);
+  // Total de la plantilla (todos los promotores registrados, o solo los de
+  // ESE supervisor) — a diferencia de `summary.promoters`, que solo incluye a
+  // quien tuvo actividad en el rango. Con esto el tablero puede mostrar
+  // "cuántos faltan de estar en tienda" contra el total real, no solo contra
+  // los que ya hicieron algo hoy.
+  summary.totals.rosterTotal = await getRosterTotal(supervisorId);
   return summary;
 }
 
 // Mismo resumen, pero acotado a los promotores de un supervisor.
-export async function getSupervisorSummary(supervisorId, rangeKey = "today") {
-  return getManagerSummary(rangeKey, { supervisorId });
+export async function getSupervisorSummary(supervisorId, rangeKey = "today", { from, to } = {}) {
+  return getManagerSummary(rangeKey, { supervisorId, from, to });
 }
 
-// --- Metas: progreso mensual por promotor -----------------------------------
-// Le agrega `goal: { target, achieved, reached }` a cada promotor del resumen
-// (o `goal: null` si no tiene meta definida en el Sheet). El acumulado del mes
-// se calcula con la MISMA fuente que el resto del tablero (VISITS_SOURCE): así
-// en desarrollo local (Sheet) el avance de meta coincide con lo que ya se ve
-// en pantalla, y en producción (base de datos) es el acumulado real.
+// Cuántos promotores hay registrados en total (o bajo un supervisor dado),
+// sin importar si tuvieron actividad hoy. Con AUTH_SOURCE=sheet (el modo
+// real) lee el Sheet directo; si no, cuenta los promotores locales conocidos.
+async function getRosterTotal(supervisorId) {
+  if (config.authSource === "sheet") {
+    const all = await getAllPromotersFromSheet();
+    if (!supervisorId) return all.size;
+    let count = 0;
+    for (const p of all.values()) {
+      if ((p.supervisor || "").trim().toLowerCase() === supervisorId) count++;
+    }
+    return count;
+  }
+  const all = await prisma.promoter.findMany({ select: { supervisor: true } });
+  if (!supervisorId) return all.length;
+  return all.filter((p) => (p.supervisor || "").trim().toLowerCase() === supervisorId).length;
+}
+
+// --- Metas: progreso SEMANAL por promotor ------------------------------------
+// Le agrega `goal: { target, achieved, reached }` a cada promotor del resumen,
+// en "unidades-equivalentes de rollo" (ver goalUnits en goalsSheet.js). Todo
+// promotor tiene meta: la personalizada del Sheet si existe, si no el default
+// (DEFAULT_WEEKLY_GOAL_ROLLOS). El acumulado de la SEMANA se calcula con la
+// MISMA fuente que el resto del tablero (VISITS_SOURCE): así en desarrollo
+// local (Sheet) el avance de meta coincide con lo que ya se ve en pantalla, y
+// en producción (base de datos) es el acumulado real.
 async function attachGoalProgress(summary) {
-  const month = resolveRange("month");
-  const monthRows =
+  const week = resolveRange("week");
+  const weekRows =
     config.visitsSource === "sheet"
-      ? await fetchVisitRowsFromSheet(month)
+      ? await fetchVisitRowsFromSheet(week)
       : await prisma.visitRecord.findMany({
-          where: { day: { gte: month.from, lte: month.to } },
-          select: { promoterId: true, rollos: true, cubetas: true, galones: true },
+          where: { day: { gte: week.from, lte: week.to } },
+          select: { promoterId: true, rollos: true, cubetas: true },
         });
 
   const achievedByPromoter = new Map();
-  for (const r of monthRows) {
-    achievedByPromoter.set(r.promoterId, (achievedByPromoter.get(r.promoterId) || 0) + (r.rollos || 0) + (r.cubetas || 0) + (r.galones || 0));
+  for (const r of weekRows) {
+    achievedByPromoter.set(r.promoterId, (achievedByPromoter.get(r.promoterId) || 0) + goalUnits(r));
   }
 
   for (const p of summary.promoters) {
-    const target = await getPromoterGoal(p.id);
+    const target = (await getPromoterGoal(p.id)) ?? DEFAULT_WEEKLY_GOAL_ROLLOS;
     const achieved = achievedByPromoter.get(p.id) ?? 0;
-    p.goal = target ? { target, achieved, reached: achieved >= target } : null;
+    p.goal = { target, achieved, reached: achieved >= target };
   }
 }
 
 // --- Notificaciones disparadas por check-in / check-out ---------------------
 
+// Tolerancia (minutos) sobre la hora de "Entrada" del promotor (pestaña
+// Promotores) para seguir considerándolo puntual.
+const LATE_TOLERANCE_MINUTES = 15;
+
+// "H:MM"/"HH:MM" -> minutos desde medianoche, o null si no es un horario
+// válido (promotor sin horario asignado en el Sheet).
+function minutesOfDay(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm ?? "").trim());
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+// Texto de puntualidad para la notificación de check-in, comparando la hora
+// real (en hora de México) contra la "Entrada" esperada del promotor, con
+// LATE_TOLERANCE_MINUTES de tolerancia. Cadena vacía si el promotor no tiene
+// horario configurado (no se le exige nada).
+function puntualidadTexto(promoter, checkInTime) {
+  const entradaMin = minutesOfDay(promoter?.entrada);
+  if (entradaMin == null) return "";
+  const horaLocal = formatMexicoDateTime(checkInTime).slice(11, 16); // "HH:mm"
+  const checkInMin = minutesOfDay(horaLocal);
+  if (checkInMin == null) return "";
+  const diff = checkInMin - entradaMin;
+  if (diff <= LATE_TOLERANCE_MINUTES) return " Llegó a tiempo.";
+  return ` Llegó ${diff} min tarde (entrada esperada ${promoter.entrada}, tolerancia ${LATE_TOLERANCE_MINUTES} min).`;
+}
+
 // Se llama al hacer CHECK-IN: avisa al supervisor del promotor (si tiene uno)
-// con la tienda y el nombre del asesor. Best-effort: nunca lanza.
-export async function notifyCheckIn(promoterId, storeId) {
+// con la tienda, el nombre del asesor, y si llegó a tiempo o tarde (según su
+// horario de "Entrada" en el Sheet, con 15 min de tolerancia). Best-effort:
+// nunca lanza.
+export async function notifyCheckIn(promoterId, storeId, checkInTime = new Date()) {
   try {
     const [promoter, store] = await Promise.all([findPromoterById(promoterId), getStore(storeId)]);
     const supervisorId = (promoter?.supervisor || "").trim().toLowerCase();
@@ -265,74 +320,76 @@ export async function notifyCheckIn(promoterId, storeId) {
       promotor: promoter?.name || promoterId,
       idTienda: storeId,
       tienda: store?.name || storeId,
-      detalle: `${promoter?.name || promoterId} hizo check-in en ${store?.name || storeId}.`,
+      detalle: `${promoter?.name || promoterId} hizo check-in en ${store?.name || storeId}.${puntualidadTexto(promoter, checkInTime)}`,
     });
   } catch (e) {
     console.error("[db] notifyCheckIn falló:", e.message);
   }
 }
 
-// Unidades (rollos+cubetas) que un promotor lleva vendidas ESTE MES, siempre
-// desde la base de datos real (el check-out de un promotor ya escribe ahí sin
-// importar VISITS_SOURCE — eso solo afecta cómo se reconstruye la vista del
-// gerente/supervisor en desarrollo local).
-async function monthToDateUnitsForPromoter(promoterId, month = resolveRange("month")) {
+// Unidades-equivalentes (rollos + cubetas ponderadas, ver goalUnits) que un
+// promotor lleva vendidas ESTA SEMANA, siempre desde la base de datos real
+// (el check-out de un promotor ya escribe ahí sin importar VISITS_SOURCE —
+// eso solo afecta cómo se reconstruye la vista del gerente/supervisor en
+// desarrollo local).
+async function weekToDateUnitsForPromoter(promoterId, week = resolveRange("week")) {
   const sum = await prisma.visitRecord.aggregate({
-    where: { promoterId, day: { gte: month.from, lte: month.to } },
-    _sum: { rollos: true, cubetas: true, galones: true },
+    where: { promoterId, day: { gte: week.from, lte: week.to } },
+    _sum: { rollos: true, cubetas: true },
   });
-  return (sum._sum.rollos || 0) + (sum._sum.cubetas || 0) + (sum._sum.galones || 0);
+  return goalUnits({ rollos: sum._sum.rollos, cubetas: sum._sum.cubetas });
 }
 
-// Meta y avance del MES del promotor logueado — lo consume su propia app
-// ("Mi meta de ventas" en el dashboard de campo).
+// Meta y avance de la SEMANA del promotor logueado (personalizada o el
+// default) — lo consume su propia app ("Mi meta de ventas" en el dashboard
+// de campo).
 export async function getMyGoalProgress(promoterId) {
-  const target = await getPromoterGoal(promoterId);
-  if (!target) return null;
-  const achieved = await monthToDateUnitsForPromoter(promoterId);
+  const target = (await getPromoterGoal(promoterId)) ?? DEFAULT_WEEKLY_GOAL_ROLLOS;
+  const achieved = await weekToDateUnitsForPromoter(promoterId);
   return { target, achieved, reached: achieved >= target };
 }
 
-// Fija (crea o reemplaza) la meta MENSUAL de un promotor, en unidades. Lo usa
-// el botón "Meta" del tablero del gerente/admin. `nombre` es solo para que la
-// fila del Sheet sea legible a simple vista.
+// Fija (crea o reemplaza) la meta SEMANAL personalizada de un promotor, en
+// unidades-equivalentes de rollo. Lo usa el botón "Meta" del tablero del
+// gerente/admin, como EXCEPCIÓN al default (DEFAULT_WEEKLY_GOAL_ROLLOS).
+// `nombre` es solo para que la fila del Sheet sea legible a simple vista.
 export async function setPromoterGoal(promoterId, meta, nombre) {
   await setPromoterGoalInSheet(promoterId, meta, nombre);
 }
 
 // Se llama al hacer CHECK-OUT: si el promotor o la tienda ya llegaron a su
-// meta MENSUAL (unidades = rollos+cubetas), notifica UNA sola vez por mes
-// (idempotente vía hasGoalNotification, no por detección exacta del cruce).
+// meta SEMANAL (unidades-equivalentes, ver goalUnits), notifica UNA sola vez
+// por semana (idempotente vía hasGoalNotification, no por detección exacta
+// del cruce). El promotor SIEMPRE tiene meta (personalizada o el default); la
+// tienda solo si tiene una personalizada en el Sheet.
 export async function checkAndNotifyGoals(promoterId, storeId) {
   try {
-    const month = resolveRange("month");
-    const periodo = month.from.slice(0, 7); // "YYYY-MM"
+    const week = resolveRange("week");
+    const periodo = week.from; // "YYYY-MM-DD" del lunes de esa semana
 
-    const promoterGoal = await getPromoterGoal(promoterId);
-    if (promoterGoal) {
-      const achieved = await monthToDateUnitsForPromoter(promoterId, month);
-      if (achieved >= promoterGoal && !(await hasGoalNotification({ tipo: "promoter_goal", id: promoterId, periodo }))) {
-        const promoter = await findPromoterById(promoterId);
-        const supervisorId = (promoter?.supervisor || "").trim().toLowerCase();
-        await appendNotification({
-          tipo: "promoter_goal",
-          para: supervisorId || "admin",
-          idPromotor: promoterId,
-          promotor: promoter?.name || promoterId,
-          periodo,
-          detalle: `${promoter?.name || promoterId} alcanzó su meta mensual (${achieved}/${promoterGoal} unidades).`,
-        });
-      }
+    const promoterGoal = (await getPromoterGoal(promoterId)) ?? DEFAULT_WEEKLY_GOAL_ROLLOS;
+    const achieved = await weekToDateUnitsForPromoter(promoterId, week);
+    if (achieved >= promoterGoal && !(await hasGoalNotification({ tipo: "promoter_goal", id: promoterId, periodo }))) {
+      const promoter = await findPromoterById(promoterId);
+      const supervisorId = (promoter?.supervisor || "").trim().toLowerCase();
+      await appendNotification({
+        tipo: "promoter_goal",
+        para: supervisorId || "admin",
+        idPromotor: promoterId,
+        promotor: promoter?.name || promoterId,
+        periodo,
+        detalle: `${promoter?.name || promoterId} alcanzó su meta semanal (${achieved.toFixed(1)}/${promoterGoal} unidades).`,
+      });
     }
 
     const storeGoal = await getStoreGoal(storeId);
     if (storeGoal) {
       const sum = await prisma.visitRecord.aggregate({
-        where: { storeId, day: { gte: month.from, lte: month.to } },
-        _sum: { rollos: true, cubetas: true, galones: true },
+        where: { storeId, day: { gte: week.from, lte: week.to } },
+        _sum: { rollos: true, cubetas: true },
       });
-      const achieved = (sum._sum.rollos || 0) + (sum._sum.cubetas || 0) + (sum._sum.galones || 0);
-      if (achieved >= storeGoal && !(await hasGoalNotification({ tipo: "store_goal", id: storeId, periodo }))) {
+      const storeAchieved = goalUnits({ rollos: sum._sum.rollos, cubetas: sum._sum.cubetas });
+      if (storeAchieved >= storeGoal && !(await hasGoalNotification({ tipo: "store_goal", id: storeId, periodo }))) {
         const store = await getStore(storeId);
         await appendNotification({
           tipo: "store_goal",
@@ -340,7 +397,7 @@ export async function checkAndNotifyGoals(promoterId, storeId) {
           idTienda: storeId,
           tienda: store?.name || storeId,
           periodo,
-          detalle: `${store?.name || storeId} alcanzó su meta mensual (${achieved}/${storeGoal} unidades).`,
+          detalle: `${store?.name || storeId} alcanzó su meta semanal (${storeAchieved.toFixed(1)}/${storeGoal} unidades).`,
         });
       }
     }

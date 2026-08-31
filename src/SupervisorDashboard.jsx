@@ -13,13 +13,13 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   LogOut, RefreshCw, Search, HelpCircle,
-  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell, Flag,
+  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell, Flag, UserCheck, UserX,
 } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { COLORS, detectScheme, applyScheme } from "./theme.js";
 import {
-  fmtMoney, fmtNum, todayStamp, RANGE_OPTIONS, RANGE_LABELS,
+  fmtMoney, fmtMoneyCompact, fmtNum, todayStamp, RANGE_OPTIONS, RANGE_LABELS, MEXICO_ESTADOS,
   bgTexture, Brand, NationalMap, BarChart, Kpi, ChartCard, PromoterRow, PanelHeader,
   buildExportRows, downloadCsv, downloadXlsx,
 } from "./dashboardShared.jsx";
@@ -39,12 +39,12 @@ const ONBOARDING_STEPS_SUPERVISOR = [
   {
     icon: Target,
     title: "La meta de tu equipo",
-    body: "Cada promotor muestra su meta mensual (la fija el administrador) y su avance del mes.",
+    body: "Cada promotor muestra su meta semanal (30 rollos-equivalentes por defecto, o la que le fije el administrador) y su avance de la semana.",
   },
   {
     icon: Bell,
     title: "Notificaciones de tu equipo",
-    body: "La campana te avisa cuando uno de tus promotores hace check-in (con la tienda) y cuando alcanza su meta del mes.",
+    body: "La campana te avisa cuando uno de tus promotores hace check-in (con la tienda y si llegó a tiempo) y cuando alcanza su meta de la semana.",
   },
   {
     icon: MapPin,
@@ -83,8 +83,12 @@ export default function SupervisorDashboard() {
 
   const [panelMode, setPanelMode] = useState("open");
   const [segment, setSegment] = useState("todos");
+  const [estado, setEstado] = useState("todos");
   const [query, setQuery] = useState("");
   const [range, setRange] = useState("today");
+  // Fechas del rango "Personalizado…" (YYYY-MM-DD, del <input type="date">).
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   // Rollos/cubetas/galones: multi-select (no excluyentes) — ver ManagerDashboard.
   const [unitFilter, setUnitFilter] = useState(() => new Set());
   const toggleUnit = (u) => setUnitFilter((prev) => {
@@ -94,10 +98,11 @@ export default function SupervisorDashboard() {
   });
 
   const load = useCallback(async (signal) => {
+    if (range === "custom" && (!customFrom || !customTo)) return; // esperando ambas fechas
     setLoading(true);
     setError("");
     try {
-      const data = await api.supervisorSummary(range, signal);
+      const data = await api.supervisorSummary(range, signal, { from: customFrom, to: customTo });
       setSummary(data);
       setUpdatedAt(new Date());
     } catch (e) {
@@ -106,7 +111,7 @@ export default function SupervisorDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [range]);
+  }, [range, customFrom, customTo]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -115,12 +120,21 @@ export default function SupervisorDashboard() {
   }, [load]);
 
   const promoters = summary?.promoters ?? [];
-  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, galones: 0, money: 0, checkedIn: 0, withoutSales: 0 };
+  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, galones: 0, money: 0, checkedIn: 0, withoutSales: 0, rosterTotal: 0 };
   const prices = summary?.prices ?? { rollo: 0, cubeta: 0 };
   const useMoney = totals.money > 0;
+  // "En su lugar" = con check-in abierto AHORA MISMO, contra el total de
+  // promotores de TU equipo (no solo los que tuvieron actividad en el rango).
+  const faltanEnTienda = Math.max(0, (totals.rosterTotal || 0) - totals.checkedIn);
+  const pctEnTienda = totals.rosterTotal > 0 ? Math.round((totals.checkedIn / totals.rosterTotal) * 100) : 0;
+
+  // Los 32 estados de México siempre completos en el dropdown (no solo los
+  // que tengan actividad en el rango actual) — igual que ManagerDashboard.
+  const estados = MEXICO_ESTADOS;
 
   const filtered = useMemo(() => {
     let list = promoters;
+    if (estado !== "todos") list = list.filter((p) => (p.estado || "Sin estado") === estado);
     if (segment === "con") list = list.filter((p) => p.rollos + p.cubetas + p.galones > 0);
     else if (segment === "sin") list = list.filter((p) => p.rollos + p.cubetas + p.galones === 0);
     else if (segment === "meta") list = list.filter((p) => p.goal?.reached);
@@ -131,7 +145,7 @@ export default function SupervisorDashboard() {
       list = list.filter((p) => (p.name || "").toLowerCase().includes(q) || String(p.id).includes(q));
     }
     return list;
-  }, [promoters, segment, query, unitFilter]);
+  }, [promoters, estado, segment, query, unitFilter]);
 
   const metric = unitFilter.size > 0
     ? (p) => [...unitFilter].reduce((sum, u) => sum + (p[u] || 0), 0)
@@ -145,6 +159,14 @@ export default function SupervisorDashboard() {
     () => [...filtered].sort((a, b) => metric(b) - metric(a)).slice(0, 8).map((p) => ({ label: p.name, value: metric(p) })),
     [filtered, useMoney, unitFilter]
   );
+  const estadoData = useMemo(() => {
+    const m = new Map();
+    for (const p of filtered) {
+      const k = p.estado || "Sin estado";
+      m.set(k, (m.get(k) || 0) + metric(p));
+    }
+    return [...m.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  }, [filtered, useMoney, unitFilter]);
   const composicion = useMoney
     ? [
         { label: "Rollos ($)", value: totals.rollos * prices.rollo },
@@ -251,8 +273,8 @@ export default function SupervisorDashboard() {
           eso, el mapa) por lo que representa ese indicador. */}
       <div style={{ display: "flex", gap: 8, padding: "10px 12px", overflowX: "auto", flexShrink: 0, borderBottom: `1px solid ${COLORS.border}` }}>
         <Kpi
-          icon={DollarSign} label={`Vendido · ${RANGE_LABELS[range]}`} value={fmtMoney(totals.money)} accent
-          tooltip="Suma en dinero de todas las ventas (rollos + cubetas) de tu equipo en este período."
+          icon={DollarSign} label={`Vendido · ${RANGE_LABELS[range]}`} value={fmtMoneyCompact(totals.money)} accent
+          tooltip={`${fmtMoney(totals.money)} · suma en dinero de todas las ventas (rollos + cubetas) de tu equipo en este período.`}
           onClick={() => setSegment("con")} active={segment === "con"}
         />
         <Kpi
@@ -287,8 +309,18 @@ export default function SupervisorDashboard() {
         />
         <Kpi
           icon={AlertTriangle} label="Metas alcanzadas" value={fmtNum(metasAlcanzadas)} accent={metasAlcanzadas > 0}
-          tooltip="Promotores de tu equipo que ya llegaron a su meta mensual de unidades."
+          tooltip="Promotores de tu equipo que ya llegaron a su meta semanal de unidades."
           onClick={() => setSegment("meta")} active={segment === "meta"}
+        />
+        <Kpi
+          icon={UserX} label="Faltan en tienda" value={fmtNum(faltanEnTienda)}
+          tooltip="Promotores de tu equipo que AHORA MISMO no tienen un check-in abierto (sobre el total de tu equipo, no solo los activos en este período)."
+          onClick={() => setSegment("in")}
+        />
+        <Kpi
+          icon={UserCheck} label="% en su lugar" value={`${pctEnTienda}%`}
+          tooltip={`${fmtNum(totals.checkedIn)} de ${fmtNum(totals.rosterTotal)} promotores de tu equipo tienen un check-in abierto ahora mismo.`}
+          onClick={() => setSegment("in")} active={segment === "in"}
         />
       </div>
 
@@ -349,6 +381,16 @@ export default function SupervisorDashboard() {
                       </button>
                     );
                   })}
+                  <select
+                    value={estado}
+                    onChange={(e) => setEstado(e.target.value)}
+                    style={{ marginLeft: "auto", padding: "6px 10px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontSize: 12, fontWeight: 600, cursor: "pointer", maxWidth: 160 }}
+                  >
+                    <option value="todos">Todos los estados</option>
+                    {estados.map((e) => (
+                      <option key={e} value={e}>{e}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -366,6 +408,19 @@ export default function SupervisorDashboard() {
                         <option key={r.key} value={r.key}>{r.label}</option>
                       ))}
                     </select>
+                    {range === "custom" && (
+                      <>
+                        <input
+                          type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} max={customTo || undefined}
+                          style={{ padding: "6px 8px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontSize: 12.5 }}
+                        />
+                        <span style={{ color: COLORS.textMuted, fontSize: 12 }}>a</span>
+                        <input
+                          type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} min={customFrom || undefined}
+                          style={{ padding: "6px 8px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontSize: 12.5 }}
+                        />
+                      </>
+                    )}
                     <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
                       <button
                         onClick={() => downloadCsv(exportRows, exportFilename("csv"))}
@@ -387,6 +442,9 @@ export default function SupervisorDashboard() {
                   </div>
                   <ChartCard title={`Top de mi equipo (${unitLabel})`}>
                     <BarChart data={topData} color={COLORS.accent} format={metricFmt} />
+                  </ChartCard>
+                  <ChartCard title={`Ventas por estado (${unitLabel})`}>
+                    <BarChart data={estadoData} color={COLORS.success} format={metricFmt} />
                   </ChartCard>
                   <ChartCard title="Composición del período">
                     <BarChart data={composicion} color={COLORS.accentText} format={useMoney ? fmtMoney : fmtNum} />

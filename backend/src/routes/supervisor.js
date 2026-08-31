@@ -10,13 +10,13 @@ import { getSupervisorSummary, getCompetitionReports } from "../db.js";
 const router = Router();
 router.use(requireAuth, requireRole("supervisor"));
 
-const RANGE_KEYS = ["today", "yesterday", "week", "last_week", "month", "last_month", "year", "last_year"];
+const RANGE_KEYS = ["today", "yesterday", "week", "last_week", "month", "last_month", "year", "last_year", "custom"];
 
-// GET /api/supervisor/summary?range=today|yesterday|week|last_week|month|last_month|year|last_year
+// GET /api/supervisor/summary?range=today|yesterday|week|last_week|month|last_month|year|last_year|custom&from=&to=
 router.get("/summary", async (req, res) => {
   try {
     const range = RANGE_KEYS.includes(String(req.query.range)) ? String(req.query.range) : "today";
-    const summary = await getSupervisorSummary(req.promoter.id, range);
+    const summary = await getSupervisorSummary(req.promoter.id, range, { from: req.query.from, to: req.query.to });
     return res.json(summary);
   } catch (err) {
     console.error("[supervisor/summary]", err);

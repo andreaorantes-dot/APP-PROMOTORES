@@ -39,7 +39,7 @@ async function loadPromoters() {
     range: `${config.sheets.promotersTab}!A1:Z2000`,
   });
   const rows = res.data.values ?? [];
-  let header = -1, idC = -1, passC = -1, nameC = -1, locC = -1, supC = -1, estC = -1;
+  let header = -1, idC = -1, passC = -1, nameC = -1, locC = -1, supC = -1, estC = -1, entC = -1, salC = -1;
   for (let r = 0; r < rows.length; r++) {
     const cells = rows[r].map((c) => String(c ?? "").trim());
     const idI = cells.findIndex((c) => /^id$/i.test(c));
@@ -50,6 +50,8 @@ async function loadPromoters() {
       locC = cells.findIndex((c) => /ubicaci/i.test(c));
       supC = cells.findIndex((c) => /supervisor/i.test(c));
       estC = cells.findIndex((c) => /^estado$/i.test(c));
+      entC = cells.findIndex((c) => /^entrada$/i.test(c));
+      salC = cells.findIndex((c) => /^salida$/i.test(c));
       break;
     }
   }
@@ -66,6 +68,9 @@ async function loadPromoters() {
       location: locC !== -1 ? String(cells?.[locC] ?? "").trim() : null,
       supervisor: supC !== -1 ? String(cells?.[supC] ?? "").trim() : null,
       estado: estC !== -1 ? String(cells?.[estC] ?? "").trim() || null : null,
+      // Horario esperado ("H:MM", 24h) — puede faltar si aún no se llenó.
+      entrada: entC !== -1 ? String(cells?.[entC] ?? "").trim() || null : null,
+      salida: salC !== -1 ? String(cells?.[salC] ?? "").trim() || null : null,
       password: String(cells?.[passC] ?? "").trim(), // hash bcrypt
     });
   }

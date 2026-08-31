@@ -1,16 +1,20 @@
 // ---------------------------------------------------------------------------
-// Metas de venta mensuales (por promotor y por tienda) desde Google Sheets.
+// Metas de venta SEMANALES (por promotor y por tienda) desde Google Sheets.
 // ---------------------------------------------------------------------------
 // Pestaña "Metas", con encabezados detectados por nombre (no por posición):
 //   Tipo | ID | Nombre | Meta
 //   - Tipo  → "promotor" o "tienda".
 //   - ID    → ID del promotor o de la tienda (debe coincidir con su ID real).
 //   - Nombre → solo para que sea legible en el Sheet; no se usa para nada.
-//   - Meta  → unidades vendidas (rollos+cubetas) EN EL MES para considerarla
-//             alcanzada.
+//   - Meta  → "unidades-equivalentes de rollo" vendidas EN LA SEMANA para
+//             considerarla alcanzada (ver DEFAULT_WEEKLY_GOAL_ROLLOS/goalUnits
+//             más abajo — 1 rollo = 1 unidad, 1 cubeta = CUBETA_WEIGHT
+//             unidades, los galones no cuentan hacia la meta).
 //
-// Una fila ausente = sin meta definida para ese promotor/tienda (no se le
-// exige nada ni se generan notificaciones de meta para él/ella).
+// Una fila ausente = SIN META PERSONALIZADA para ese promotor/tienda. Para
+// promotores (no tiendas), db.js usa entonces el default fijo
+// (DEFAULT_WEEKLY_GOAL_ROLLOS) en vez de "sin meta" — la meta personalizada
+// de aquí es la EXCEPCIÓN, no el único camino para tener una meta.
 //
 // Cachea en memoria (TTL) para no llamar a la API en cada check-out. Si la
 // pestaña aún no existe o no hay credenciales, se comporta como "sin metas"
@@ -24,6 +28,24 @@ import { config } from "./config.js";
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 const TTL_MS = Number(process.env.GOALS_CACHE_TTL_MS ?? 5 * 60 * 1000);
 const HEADERS = ["Tipo", "ID", "Nombre", "Meta"];
+
+// Meta semanal por defecto de un promotor SIN meta personalizada: 30 rollos,
+// o 50 cubetas, o una mezcla coherente entre ambos ("Actualizamos las metas,
+// la meta son 30 rollos a la semana o 50 cubetas a la semana o una mezcla
+// coherente de los productos"). Se modela como "unidades-equivalentes de
+// rollo": 1 rollo = 1 unidad, 1 cubeta = CUBETA_WEIGHT unidades (30/50, así
+// 50 cubetas también llegan a 30 unidades), los galones NO cuentan hacia la
+// meta. Una meta PERSONALIZADA (fila en "Metas") se interpreta con la misma
+// fórmula, solo que con otro número de unidades objetivo.
+export const DEFAULT_WEEKLY_GOAL_ROLLOS = 30;
+const DEFAULT_WEEKLY_GOAL_CUBETAS = 50;
+export const CUBETA_WEIGHT = DEFAULT_WEEKLY_GOAL_ROLLOS / DEFAULT_WEEKLY_GOAL_CUBETAS;
+
+// Unidades-equivalentes de rollo de una visita/suma (rollos + cubetas
+// ponderadas; los galones no cuentan hacia la meta).
+export function goalUnits({ rollos, cubetas }) {
+  return (rollos || 0) + (cubetas || 0) * CUBETA_WEIGHT;
+}
 
 let clientPromise = null;
 let cache = { at: 0, promoters: new Map(), stores: new Map() };
@@ -97,13 +119,15 @@ async function ensureCache() {
   return cache;
 }
 
-// Meta mensual (unidades) de un promotor, o null si no tiene una definida.
+// Meta PERSONALIZADA (unidades-equivalentes) de un promotor, o null si usa el
+// default (ver DEFAULT_WEEKLY_GOAL_ROLLOS en db.js, que aplica el fallback).
 export async function getPromoterGoal(promoterId) {
   const { promoters } = await ensureCache();
   return promoters.get(String(promoterId).trim()) ?? null;
 }
 
-// Meta mensual (unidades) de una tienda, o null si no tiene una definida.
+// Meta semanal (unidades-equivalentes) de una tienda, o null si no tiene una
+// definida (las tiendas NO tienen default — solo meta personalizada).
 export async function getStoreGoal(storeId) {
   const { stores } = await ensureCache();
   return stores.get(String(storeId).trim()) ?? null;
@@ -146,7 +170,7 @@ function colLetter(idx) {
   return s;
 }
 
-// Crea o actualiza la meta mensual de un promotor o tienda (`tipo`: "promotor"
+// Crea o actualiza la meta semanal de un promotor o tienda (`tipo`: "promotor"
 // | "tienda"). Actualiza también el caché en memoria al instante, para que el
 // tablero refleje el cambio sin esperar el TTL. Usado por el botón "Meta" del
 // tablero del gerente/admin.

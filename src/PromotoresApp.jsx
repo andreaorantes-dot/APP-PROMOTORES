@@ -306,14 +306,15 @@ function GoalBar({ label, actual, meta }) {
 
 // Barra de meta de ventas con gamificación (nivel + mensaje motivacional).
 // `goal` viene de GET /api/visits/my-goal: { target, achieved, reached }
-// (unidades = rollos+cubetas+galones ACUMULADOS EN EL MES, fijadas por el
-// admin desde su tablero) o `null` si todavía no tiene una meta asignada.
+// (unidades-equivalentes: rollos + cubetas ponderadas, ACUMULADAS EN LA
+// SEMANA — los galones no cuentan hacia la meta; personalizada o el default
+// de 30) o `null` mientras todavía no llega la respuesta del servidor.
 function SalesGoals({ goal }) {
   if (!goal) {
     return (
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
         <Trophy size={16} color={COLORS.textMuted} style={{ flexShrink: 0, marginTop: 1 }} />
-        <span style={{ fontSize: 12.5, color: COLORS.textMuted, lineHeight: 1.45 }}>Todavía no tienes una meta de ventas asignada este mes.</span>
+        <span style={{ fontSize: 12.5, color: COLORS.textMuted, lineHeight: 1.45 }}>Cargando tu meta de ventas…</span>
       </div>
     );
   }
@@ -321,20 +322,20 @@ function SalesGoals({ goal }) {
   const level = pct >= 100 ? "Nivel Oro" : pct >= 50 ? "Nivel Plata" : "Nivel Bronce";
   const faltan = Math.max(0, goal.target - goal.achieved);
   const msg = goal.reached
-    ? "¡Meta cumplida este mes! Excelente trabajo."
-    : pct >= 75 ? `¡Casi lo logras! Te faltan ${faltan} unidades este mes.`
-    : pct >= 40 ? `¡Vas muy bien! Te faltan ${faltan} unidades para tu meta del mes.`
-    : "¡Vamos con todo! Cada visita te acerca a tu meta del mes.";
+    ? "¡Meta cumplida esta semana! Excelente trabajo."
+    : pct >= 75 ? `¡Casi lo logras! Te faltan ${faltan.toFixed(1)} unidades esta semana.`
+    : pct >= 40 ? `¡Vas muy bien! Te faltan ${faltan.toFixed(1)} unidades para tu meta de la semana.`
+    : "¡Vamos con todo! Cada visita te acerca a tu meta de la semana.";
   return (
     <>
       <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>META DE VENTAS DEL MES</span>
+          <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>META DE VENTAS DE LA SEMANA</span>
           <span style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.accentSoft, color: COLORS.accentText, fontSize: 10.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999 }}>
             <Trophy size={12} /> {level}
           </span>
         </div>
-        <GoalBar label="Rollos + cubetas + galones" actual={goal.achieved} meta={goal.target} />
+        <GoalBar label="Rollos + cubetas (1 cubeta = 0.6)" actual={goal.achieved} meta={goal.target} />
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: COLORS.successSoft, border: `1px solid ${COLORS.success}55`, borderRadius: 12, padding: "10px 12px", marginBottom: 14 }}>
         <Zap size={16} color={COLORS.success} style={{ flexShrink: 0, marginTop: 1 }} />

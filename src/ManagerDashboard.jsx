@@ -17,13 +17,13 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   LogOut, RefreshCw, Search, HelpCircle,
-  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell, Flag,
+  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell, Flag, UserCheck, UserX,
 } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { COLORS, detectScheme, applyScheme } from "./theme.js";
 import {
-  fmtMoney, fmtNum, todayStamp, RANGE_OPTIONS, RANGE_LABELS, MEXICO_ESTADOS,
+  fmtMoney, fmtMoneyCompact, fmtNum, todayStamp, RANGE_OPTIONS, RANGE_LABELS, MEXICO_ESTADOS,
   bgTexture, Brand, NationalMap, BarChart, Kpi, ChartCard, PromoterRow, PanelHeader, EditGoalModal,
   buildExportRows, downloadCsv, downloadXlsx,
 } from "./dashboardShared.jsx";
@@ -48,12 +48,12 @@ const ONBOARDING_STEPS_ADMIN = [
   {
     icon: Target,
     title: "Fija la meta de cada promotor",
-    body: "El botón \"Meta\" junto a su nombre te deja asignar su meta mensual (unidades). Los supervisores la ven; el promotor también.",
+    body: "El botón \"Meta\" junto a su nombre te deja asignar su meta semanal (30 rollos-equivalentes por defecto). Los supervisores la ven; el promotor también.",
   },
   {
     icon: Bell,
     title: "Notificaciones",
-    body: "La campana te muestra el Top 5 de vendedores del día y te avisa cuando una tienda alcanza su meta mensual.",
+    body: "La campana te muestra el Top 5 de vendedores del día, si un promotor llegó a tiempo, y te avisa cuando una tienda alcanza su meta semanal.",
   },
   {
     icon: MapPin,
@@ -114,12 +114,16 @@ export default function ManagerDashboard() {
   // Rango de fechas (dropdown, solo visible al maximizar). Cambiar el rango
   // vuelve a pedir el resumen al servidor (cada rango agrega días distintos).
   const [range, setRange] = useState("today");
+  // Fechas del rango "Personalizado…" (YYYY-MM-DD, del <input type="date">).
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
 
   const load = useCallback(async (signal) => {
+    if (range === "custom" && (!customFrom || !customTo)) return; // esperando ambas fechas
     setLoading(true);
     setError("");
     try {
-      const data = await api.managerSummary(range, signal);
+      const data = await api.managerSummary(range, signal, { from: customFrom, to: customTo });
       setSummary(data);
       setUpdatedAt(new Date());
     } catch (e) {
@@ -128,7 +132,7 @@ export default function ManagerDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [range]);
+  }, [range, customFrom, customTo]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -151,9 +155,13 @@ export default function ManagerDashboard() {
   }
 
   const promoters = summary?.promoters ?? [];
-  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, galones: 0, money: 0, checkedIn: 0, withoutSales: 0 };
+  const totals = summary?.totals ?? { promoters: 0, storesVisited: 0, rollos: 0, cubetas: 0, galones: 0, money: 0, checkedIn: 0, withoutSales: 0, rosterTotal: 0 };
   const prices = summary?.prices ?? { rollo: 0, cubeta: 0 };
   const useMoney = totals.money > 0;
+  // "En su lugar" = con check-in abierto AHORA MISMO, contra el total de
+  // promotores registrados (no solo los que tuvieron actividad en el rango).
+  const faltanEnTienda = Math.max(0, (totals.rosterTotal || 0) - totals.checkedIn);
+  const pctEnTienda = totals.rosterTotal > 0 ? Math.round((totals.checkedIn / totals.rosterTotal) * 100) : 0;
 
   // Los 32 estados de México siempre completos en el dropdown (no solo los
   // que tengan actividad en el rango actual).
@@ -310,8 +318,8 @@ export default function ManagerDashboard() {
           ventas" de abajo, solo que disparado desde el indicador). */}
       <div style={{ display: "flex", gap: 8, padding: "10px 12px", overflowX: "auto", flexShrink: 0, borderBottom: `1px solid ${COLORS.border}` }}>
         <Kpi
-          icon={DollarSign} label={`Vendido · ${RANGE_LABELS[range]}`} value={fmtMoney(totals.money)} accent
-          tooltip="Suma en dinero de todas las ventas (rollos + cubetas) registradas en este período."
+          icon={DollarSign} label={`Vendido · ${RANGE_LABELS[range]}`} value={fmtMoneyCompact(totals.money)} accent
+          tooltip={`${fmtMoney(totals.money)} · suma en dinero de todas las ventas (rollos + cubetas) registradas en este período.`}
           onClick={() => setSegment("con")} active={segment === "con"}
         />
         <Kpi
@@ -348,6 +356,16 @@ export default function ManagerDashboard() {
           icon={AlertTriangle} label="Sin ventas" value={fmtNum(totals.withoutSales)}
           tooltip="Promotores activos que no han registrado ninguna venta en este período."
           onClick={() => setSegment("sin")} active={segment === "sin"}
+        />
+        <Kpi
+          icon={UserX} label="Faltan en tienda" value={fmtNum(faltanEnTienda)}
+          tooltip="Promotores registrados que AHORA MISMO no tienen un check-in abierto (sobre el total de la plantilla, no solo los activos en este período)."
+          onClick={() => setSegment("in")}
+        />
+        <Kpi
+          icon={UserCheck} label="% en su lugar" value={`${pctEnTienda}%`}
+          tooltip={`${fmtNum(totals.checkedIn)} de ${fmtNum(totals.rosterTotal)} promotores registrados tienen un check-in abierto ahora mismo.`}
+          onClick={() => setSegment("in")} active={segment === "in"}
         />
       </div>
 
@@ -434,6 +452,19 @@ export default function ManagerDashboard() {
                         <option key={r.key} value={r.key}>{r.label}</option>
                       ))}
                     </select>
+                    {range === "custom" && (
+                      <>
+                        <input
+                          type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} max={customTo || undefined}
+                          style={{ padding: "6px 8px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontSize: 12.5 }}
+                        />
+                        <span style={{ color: COLORS.textMuted, fontSize: 12 }}>a</span>
+                        <input
+                          type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} min={customFrom || undefined}
+                          style={{ padding: "6px 8px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontSize: 12.5 }}
+                        />
+                      </>
+                    )}
                     <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
                       <button
                         onClick={() => downloadCsv(exportRows, exportFilename("csv"))}

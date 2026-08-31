@@ -22,6 +22,18 @@ class ApiError extends Error {
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+// Arma el query string `?range=...` de los resúmenes de gerente/supervisor,
+// agregando `from`/`to` solo cuando range="custom" (fecha personalizada).
+function rangeQuery(range, from, to) {
+  if (!range) return "";
+  const params = new URLSearchParams({ range });
+  if (range === "custom") {
+    if (from) params.set("from", from);
+    if (to) params.set("to", to);
+  }
+  return `?${params.toString()}`;
+}
+
 // Lee la cookie CSRF (legible por JS a propósito) para reenviarla en un header.
 function readCsrfCookie() {
   const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
@@ -148,11 +160,12 @@ export const api = {
 
   // --- Gerente / Admin ----------------------------------------------------
   // Resumen para el tablero del gerente (requiere rol gerente/admin en el
-  // servidor). `range` es "today" | "week" | "month" | "year"; sin él usa "today".
-  managerSummary: (range, signal) =>
-    request(`/manager/summary${range ? `?range=${encodeURIComponent(range)}` : ""}`, { signal }),
+  // servidor). `range` es "today" | "week" | "month" | "year" | "custom"; sin
+  // él usa "today". Con `range="custom"`, pasa `{from, to}` ("YYYY-MM-DD").
+  managerSummary: (range, signal, { from, to } = {}) =>
+    request(`/manager/summary${rangeQuery(range, from, to)}`, { signal }),
 
-  // Fija la meta mensual (unidades) de un promotor. Solo admin/gerente.
+  // Fija la meta semanal (unidades-equivalentes) de un promotor. Solo admin/gerente.
   setPromoterGoal: (promoterId, meta, nombre) =>
     request(`/manager/promoter/${encodeURIComponent(promoterId)}/goal`, {
       method: "PUT",
@@ -166,8 +179,8 @@ export const api = {
   // --- Supervisor -----------------------------------------------------------
   // Mismo resumen que el del gerente, pero acotado a SUS promotores (lo filtra
   // el servidor por el ID de sesión del supervisor).
-  supervisorSummary: (range, signal) =>
-    request(`/supervisor/summary${range ? `?range=${encodeURIComponent(range)}` : ""}`, { signal }),
+  supervisorSummary: (range, signal, { from, to } = {}) =>
+    request(`/supervisor/summary${rangeQuery(range, from, to)}`, { signal }),
 
   // Mismos reportes de Competencia, acotados a SU equipo.
   supervisorCompetencia: (signal) => request("/supervisor/competencia", { signal }),

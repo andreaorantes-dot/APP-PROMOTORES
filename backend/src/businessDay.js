@@ -117,11 +117,30 @@ function startOfPrevMonth(day) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
+// "YYYY-MM-DD" válido (fecha real, no solo el formato) — usado para validar
+// las fechas del rango "custom" antes de confiar en ellas. Aritmética pura de
+// calendario (sin convertir a hora de México): solo confirma que el triple
+// año/mes/día exista de verdad (rechaza cosas como "2026-02-30").
+function isValidDayKey(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s ?? ""))) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
 // Resuelve las palabras clave del dropdown de rango del tablero del gerente a
 // un rango de días [from, to] (ambos inclusive, en hora de México). Rango
 // desconocido -> "today" (mismo comportamiento que antes de tener rangos).
-export function resolveRange(rangeKey) {
+// `rangeKey === "custom"` usa `custom.from`/`custom.to` tal cual (ambas deben
+// ser "YYYY-MM-DD" válidas y from<=to) — si faltan o son inválidas, cae a
+// "today" igual que cualquier otro rango desconocido.
+export function resolveRange(rangeKey, custom = {}) {
   const today = todayKey();
+  if (rangeKey === "custom") {
+    const { from, to } = custom;
+    if (isValidDayKey(from) && isValidDayKey(to) && from <= to) return { from, to };
+    return { from: today, to: today };
+  }
   switch (rangeKey) {
     case "week":
       return { from: startOfWeek(today), to: today };

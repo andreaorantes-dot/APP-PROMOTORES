@@ -125,8 +125,8 @@ router.post("/:storeId/check-in", async (req, res) => {
     sheetWrite.catch(() => {});
 
     // Avisa a su supervisor (si tiene uno) que este promotor hizo check-in,
-    // con la tienda. Best-effort: no bloquea el check-in si falla.
-    notifyCheckIn(req.promoter.id, req.params.storeId).catch(() => {});
+    // con la tienda y si llegó a tiempo. Best-effort: no bloquea el check-in.
+    notifyCheckIn(req.promoter.id, req.params.storeId, checkInTime).catch(() => {});
 
     // No devolvemos la foto cruda; solo metadatos.
     const record = await getVisit(req.promoter.id, req.params.storeId);

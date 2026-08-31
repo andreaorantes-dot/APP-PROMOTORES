@@ -12,6 +12,15 @@ const moneyFmt = new Intl.NumberFormat("es-MX", { style: "currency", currency: "
 const numFmt = new Intl.NumberFormat("es-MX");
 export const fmtMoney = (n) => moneyFmt.format(Number(n) || 0);
 export const fmtNum = (n) => numFmt.format(Number(n) || 0);
+// Versión compacta ($1.25K, $1.56M) para el KPI de "Vendido" — el detalle por
+// promotor sigue mostrando el monto completo con fmtMoney.
+export function fmtMoneyCompact(n) {
+  const v = Number(n) || 0;
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `$${(v / 1_000).toFixed(2)}K`;
+  return fmtMoney(v);
+}
 export function fmtTime(iso) {
   if (!iso) return "--:--";
   try { return new Date(iso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }); } catch { return "--:--"; }
@@ -38,6 +47,7 @@ export const RANGE_OPTIONS = [
   { key: "last_month", label: "El mes pasado" },
   { key: "year", label: "Este año" },
   { key: "last_year", label: "El año pasado" },
+  { key: "custom", label: "Personalizado…" },
 ];
 export const RANGE_LABELS = Object.fromEntries(RANGE_OPTIONS.map((r) => [r.key, r.label]));
 
@@ -237,14 +247,15 @@ export function ChartCard({ title, children }) {
   );
 }
 
-// Barra de progreso de meta mensual (rollos+cubetas). `goal` = { target, achieved, reached } | null.
+// Barra de progreso de meta SEMANAL (unidades-equivalentes: rollos + cubetas
+// ponderadas, los galones no cuentan). `goal` = { target, achieved, reached } | null.
 export function GoalBar({ goal }) {
   if (!goal) return null;
   const pct = Math.min(100, Math.round((goal.achieved / goal.target) * 100));
   return (
     <div style={{ marginTop: 6 }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: goal.reached ? COLORS.success : COLORS.textMuted, fontWeight: 700, marginBottom: 3 }}>
-        <span>META DEL MES {goal.reached ? "· ¡ALCANZADA!" : ""}</span>
+        <span>META DE LA SEMANA {goal.reached ? "· ¡ALCANZADA!" : ""}</span>
         <span>{fmtNum(goal.achieved)}/{fmtNum(goal.target)}</span>
       </div>
       <div style={{ height: 6, borderRadius: 999, background: COLORS.surface2, overflow: "hidden" }}>
@@ -256,7 +267,7 @@ export function GoalBar({ goal }) {
 
 // Fila de un promotor en el listado. `onClick` (opcional) abre su perfil.
 // `onEditGoal` (opcional, SOLO lo pasa el tablero de admin/gerente) muestra un
-// botón para fijar/cambiar su meta mensual — el supervisor solo la ve.
+// botón para fijar/cambiar su meta semanal — el supervisor solo la ve.
 export function PromoterRow({ p, onClick, onEditGoal }) {
   const color = salesColor(p);
   const initials = (p.name || p.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
@@ -277,7 +288,7 @@ export function PromoterRow({ p, onClick, onEditGoal }) {
           {onEditGoal && (
             <button
               onClick={(e) => { e.stopPropagation(); onEditGoal(p); }}
-              title="Fijar meta mensual"
+              title="Fijar meta semanal"
               style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 3, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 999, padding: "2px 7px", color: COLORS.textMuted, fontSize: 10, fontWeight: 700, cursor: "pointer" }}
             >
               <Target size={10} /> Meta
@@ -299,9 +310,11 @@ export function PromoterRow({ p, onClick, onEditGoal }) {
   );
 }
 
-// Modal para fijar la meta MENSUAL (unidades) de un promotor. Solo lo abre el
-// tablero de admin/gerente (ver el botón "Meta" en PromoterRow). `onSave(meta)`
-// recibe el número ya validado; el llamador hace la petición y refresca.
+// Modal para fijar la meta SEMANAL personalizada (unidades-equivalentes de
+// rollo) de un promotor, como excepción al default de 30/semana. Solo lo abre
+// el tablero de admin/gerente (ver el botón "Meta" en PromoterRow).
+// `onSave(meta)` recibe el número ya validado; el llamador hace la petición y
+// refresca.
 export function EditGoalModal({ promoter, onSave, onClose, saving }) {
   const [value, setValue] = useState(String(promoter.goal?.target ?? ""));
   const [err, setErr] = useState("");
@@ -321,9 +334,9 @@ export function EditGoalModal({ promoter, onSave, onClose, saving }) {
       <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 16, width: "min(360px, 100%)", padding: 20, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <Target size={16} color={COLORS.accentText} />
-          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>Meta mensual</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: COLORS.text }}>Meta semanal</span>
         </div>
-        <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "4px 0 14px" }}>{promoter.name} · unidades (rollos + cubetas + galones) en el mes.</p>
+        <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "4px 0 14px" }}>{promoter.name} · unidades-equivalentes en la semana (1 rollo = 1, 1 cubeta = 0.6; los galones no cuentan). Default sin meta propia: 30.</p>
         <input
           type="number"
           min="1"
@@ -353,13 +366,14 @@ export function EditGoalModal({ promoter, onSave, onClose, saving }) {
 }
 
 // --- Exportación CSV / Excel -------------------------------------------------
-export const EXPORT_HEADERS = ["ID", "Promotor", "Estado", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Galones", "Dinero"];
+export const EXPORT_HEADERS = ["ID", "Promotor", "Supervisor", "Estado", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Galones", "Dinero"];
 
 export function buildExportRows(promoters) {
   return promoters.flatMap((p) =>
     (p.visits ?? []).map((v) => ({
       id: p.id,
       promotor: p.name,
+      supervisor: p.supervisor || "Sin supervisor",
       estado: v.estado || "Sin estado",
       tienda: v.storeName,
       dia: v.day || "",
@@ -392,7 +406,7 @@ export function downloadCsv(rows, filename) {
   };
   const lines = [EXPORT_HEADERS.join(",")];
   for (const r of rows) {
-    lines.push([r.id, r.promotor, r.estado, r.tienda, r.dia, r.entrada, r.salida, r.rollos, r.cubetas, r.galones, r.dinero].map(escape).join(","));
+    lines.push([r.id, r.promotor, r.supervisor, r.estado, r.tienda, r.dia, r.entrada, r.salida, r.rollos, r.cubetas, r.galones, r.dinero].map(escape).join(","));
   }
   // BOM al inicio: para que Excel detecte UTF-8 y no rompa los acentos/ñ.
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
@@ -405,7 +419,7 @@ export async function downloadXlsx(rows, filename) {
   if (!rows.length) return;
   const XLSX = await import("xlsx");
   const data = rows.map((r) => ({
-    ID: r.id, Promotor: r.promotor, Estado: r.estado, Tienda: r.tienda, Día: r.dia,
+    ID: r.id, Promotor: r.promotor, Supervisor: r.supervisor, Estado: r.estado, Tienda: r.tienda, Día: r.dia,
     Entrada: r.entrada, Salida: r.salida, Rollos: r.rollos, Cubetas: r.cubetas, Galones: r.galones, Dinero: r.dinero,
   }));
   const ws = XLSX.utils.json_to_sheet(data);
