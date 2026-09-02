@@ -10,7 +10,7 @@
 // reporte se guarda con el MISMO formato que la retroalimentación de los
 // promotores (ver report-behavior en routes/promoterProfile.js).
 import { useState, useEffect } from "react";
-import { X, User, MapPin, Store, Clock, ChevronRight, ArrowLeft, AlertTriangle, Send } from "lucide-react";
+import { X, User, MapPin, Store, Clock, ChevronRight, ArrowLeft, AlertTriangle, Send, Camera, ZoomIn } from "lucide-react";
 import { api, ApiError } from "./lib/api.js";
 import { COLORS } from "./theme.js";
 import { fmtNum, fmtDateTime } from "./dashboardShared.jsx";
@@ -122,6 +122,7 @@ export default function PromoterProfile({ promoterId, onClose }) {
   const [screen, setScreen] = useState("overview"); // "overview" | "history"
   const [openReportKey, setOpenReportKey] = useState(null);
   const [sentKeys, setSentKeys] = useState(new Set());
+  const [zoomSrc, setZoomSrc] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,6 +190,25 @@ export default function PromoterProfile({ promoterId, onClose }) {
 
               <div style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                  <Camera size={13} /> Última foto de check-in
+                </div>
+                {profile.latestPhoto ? (
+                  <button
+                    onClick={() => setZoomSrc(profile.latestPhoto)}
+                    style={{ position: "relative", width: 96, height: 96, borderRadius: 10, overflow: "hidden", border: `1px solid ${COLORS.border}`, padding: 0, cursor: "pointer", background: COLORS.surface2 }}
+                  >
+                    <img src={profile.latestPhoto} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    <span style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.15)", opacity: 0, transition: "opacity .15s" }}>
+                      <ZoomIn size={16} color="#fff" />
+                    </span>
+                  </button>
+                ) : (
+                  <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: 0 }}>Sin fotos de check-in registradas.</p>
+                )}
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
                   <Store size={13} /> Tiendas frecuentes
                 </div>
                 {profile.frequentStores.length === 0 ? (
@@ -249,6 +269,15 @@ export default function PromoterProfile({ promoterId, onClose }) {
           )}
         </div>
       </div>
+
+      {zoomSrc && (
+        <div
+          onClick={(e) => { e.stopPropagation(); setZoomSrc(null); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, cursor: "zoom-out" }}
+        >
+          <img src={zoomSrc} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8 }} />
+        </div>
+      )}
     </div>
   );
 }

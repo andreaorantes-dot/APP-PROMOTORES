@@ -5,6 +5,7 @@ import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
 import { fmtDateTime } from "./dashboardShared.jsx";
+import TrainingSection from "./TrainingSection.jsx";
 import {
   enqueueAction,
   listQueuedActions,
@@ -927,10 +928,8 @@ export default function PromotoresApp() {
       <div style={{ ...bgTexture, minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "Inter" }}>
         <div style={{ width: "100%", maxWidth: 360, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: "32px 28px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 9, background: COLORS.accentSoft, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Navigation size={17} color={COLORS.accentText} />
-            </div>
-            <span style={{ fontFamily: "Inter", fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>PROMOTORES DE CAMPO</span>
+            <img src="/icon-192.png" alt="Protexa" style={{ width: 34, height: 34, borderRadius: 9, display: "block" }} />
+            <span style={{ fontFamily: "Inter", fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>PROMOTORÍA PROTEXA</span>
           </div>
 
           {authView === "login" ? (
@@ -1438,6 +1437,25 @@ export default function PromotoresApp() {
     );
   }
 
+  // --- Capacitación / Soporte -------------------------------------------------
+  // Mismo componente (TrainingSection) para las dos, solo cambia `seccion`.
+  if (screen === "capacitacion" || screen === "soporte") {
+    const seccion = screen;
+    const title = seccion === "capacitacion" ? "Capacitación" : "Soporte";
+    return (
+      <div style={{ ...bgTexture, minHeight: "100dvh" }}>
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {presenceModalNode}
+        <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
+          <TrainingSection seccion={seccion} title={title} />
+        </div>
+        <FooterNav current={seccion} onNavigate={goTab} />
+      </div>
+    );
+  }
+
   // --- Perfil ---------------------------------------------------------------
   if (screen === "perfil") {
     const initials = (user.name || user.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
@@ -1561,27 +1579,25 @@ function TopBar({ user, onFeedback, onProfile, onHelp }) {
   );
 }
 
-// Barra de navegación inferior (footer). Capacitación y Soporte quedan
-// deshabilitadas por ahora (se implementan después).
+// Barra de navegación inferior (footer).
 function FooterNav({ current, onNavigate }) {
-  // Capacitación y Soporte abren sus NotebookLM (Google) en una pestaña nueva.
   const items = [
     { key: "dashboard", label: "Inicio", Icon: Home },
     { key: "competencia", label: "Competencia", Icon: BarChart3 },
-    { key: "capacitacion", label: "Capacitación", Icon: GraduationCap, href: "https://notebook.google.com/notebook/a632f11d-4361-410d-add1-410cfa806e34/preview" },
-    { key: "soporte", label: "Soporte", Icon: LifeBuoy, href: "https://notebook.google.com/notebook/8587af76-29d1-489b-8442-725daabceb69/preview" },
+    { key: "capacitacion", label: "Capacitación", Icon: GraduationCap },
+    { key: "soporte", label: "Soporte", Icon: LifeBuoy },
     { key: "perfil", label: "Perfil", Icon: User },
   ];
   return (
     <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, background: COLORS.surface, borderTop: `1px solid ${COLORS.border}`, zIndex: 40, paddingBottom: "env(safe-area-inset-bottom)" }}>
       <div style={{ maxWidth: 480, margin: "0 auto", display: "flex" }}>
-        {items.map(({ key, label, Icon, href }) => {
+        {items.map(({ key, label, Icon }) => {
           const active = current === key;
           const color = active ? COLORS.accentText : COLORS.textMuted;
           return (
             <button
               key={key}
-              onClick={() => (href ? window.open(href, "_blank", "noopener,noreferrer") : onNavigate(key))}
+              onClick={() => onNavigate(key)}
               title={label}
               style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "9px 0 11px", background: "none", border: "none", color, cursor: "pointer" }}
             >

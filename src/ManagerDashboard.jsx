@@ -17,7 +17,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   LogOut, RefreshCw, Search, HelpCircle,
-  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell, Flag, UserCheck, UserX,
+  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell, UserCheck, UserX,
 } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
@@ -92,7 +92,6 @@ export default function ManagerDashboard() {
   const [profileId, setProfileId] = useState(null);
   const [editingGoalFor, setEditingGoalFor] = useState(null); // promotor u null
   const [savingGoal, setSavingGoal] = useState(false);
-  const [showCompetencia, setShowCompetencia] = useState(false);
 
   // Estado del panel: open | collapsed | max
   const [panelMode, setPanelMode] = useState("open");
@@ -299,13 +298,7 @@ export default function ManagerDashboard() {
             <HelpCircle size={16} />
           </button>
           <NotificationBell />
-          <button
-            onClick={() => setShowCompetencia(true)}
-            title="Reportes de Competencia"
-            style={{ width: 36, height: 36, borderRadius: 9, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-          >
-            <Flag size={16} />
-          </button>
+          <CompetenciaPanel fetcher={api.managerCompetencia} />
           <button
             onClick={() => load()}
             disabled={loading}
@@ -536,7 +529,6 @@ export default function ManagerDashboard() {
       </div>
 
       {profileId && <PromoterProfile promoterId={profileId} onClose={() => setProfileId(null)} />}
-      {showCompetencia && <CompetenciaPanel fetcher={api.managerCompetencia} onClose={() => setShowCompetencia(false)} />}
       {editingGoalFor && (
         <EditGoalModal
           promoter={editingGoalFor}

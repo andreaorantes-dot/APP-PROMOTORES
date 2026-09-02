@@ -9,7 +9,7 @@
 import { Router } from "express";
 import { requireAuth, requireRole } from "../auth.js";
 import { listNotificationsFor } from "../notificationsSheet.js";
-import { getManagerSummary } from "../db.js";
+import { getManagerSummary, getCheckinPhoto } from "../db.js";
 import { maybeSendWeeklyReports } from "../weeklyReport.js";
 
 const router = Router();
@@ -23,7 +23,18 @@ router.get("/", async (req, res) => {
 
     const role = req.promoter.role;
     const para = role === "supervisor" ? req.promoter.id : "admin";
-    const notifications = await listNotificationsFor(para);
+    const raw = await listNotificationsFor(para);
+
+    // Cada notificación de check-in trae SU foto correspondiente (la del
+    // check-in que la generó), resuelta por promotor+tienda+día — ver
+    // getCheckinPhoto. En paralelo porque son búsquedas independientes.
+    const notifications = await Promise.all(
+      raw.map(async (n) => {
+        if (n.tipo !== "checkin") return n;
+        const photo = await getCheckinPhoto(n.idPromotor, n.idTienda, n.fecha);
+        return photo ? { ...n, photo } : n;
+      })
+    );
 
     let insight = null;
     if (role === "admin" || role === "gerente") {

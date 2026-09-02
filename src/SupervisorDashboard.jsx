@@ -13,7 +13,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   LogOut, RefreshCw, Search, HelpCircle,
-  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell, Flag, UserCheck, UserX,
+  Users, MapPin, TrendingUp, AlertTriangle, DollarSign, Store, X, Download, Target, Bell, UserCheck, UserX,
 } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
@@ -79,7 +79,6 @@ export default function SupervisorDashboard() {
   const [error, setError] = useState("");
   const [, setUpdatedAt] = useState(null);
   const [profileId, setProfileId] = useState(null);
-  const [showCompetencia, setShowCompetencia] = useState(false);
 
   const [panelMode, setPanelMode] = useState("open");
   const [segment, setSegment] = useState("todos");
@@ -254,13 +253,7 @@ export default function SupervisorDashboard() {
             <HelpCircle size={16} />
           </button>
           <NotificationBell />
-          <button
-            onClick={() => setShowCompetencia(true)}
-            title="Reportes de Competencia"
-            style={{ width: 36, height: 36, borderRadius: 9, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-          >
-            <Flag size={16} />
-          </button>
+          <CompetenciaPanel fetcher={api.supervisorCompetencia} />
           <button
             onClick={() => load()}
             disabled={loading}
@@ -483,7 +476,6 @@ export default function SupervisorDashboard() {
       </div>
 
       {profileId && <PromoterProfile promoterId={profileId} onClose={() => setProfileId(null)} />}
-      {showCompetencia && <CompetenciaPanel fetcher={api.supervisorCompetencia} onClose={() => setShowCompetencia(false)} />}
       {onboarding.open && <OnboardingTour steps={ONBOARDING_STEPS_SUPERVISOR} onClose={onboarding.dismiss} />}
     </div>
   );

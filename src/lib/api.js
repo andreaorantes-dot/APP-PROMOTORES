@@ -201,6 +201,15 @@ export const api = {
       method: "POST",
       body: { day, storeName, descripcion },
     }),
+
+  // --- Capacitación / Soporte -------------------------------------------------
+  // `seccion` es "capacitacion" | "soporte" — mismo contenido/mecánica, distinto tema.
+  trainingOnboarding: (seccion, signal) => request(`/training/${seccion}/onboarding`, { signal }),
+  trainingQuiz: (seccion, signal) => request(`/training/${seccion}/quiz`, { signal }),
+  trainingFlashcards: (seccion, signal) => request(`/training/${seccion}/flashcards`, { signal }),
+  trainingProgressSummary: (seccion, signal) => request(`/training/${seccion}/progress-summary`, { signal }),
+  trainingProgress: (seccion, { tipo, orden, correct }) =>
+    request(`/training/${seccion}/progress`, { method: "POST", body: { tipo, orden, correct } }),
 };
 
 export { ApiError };

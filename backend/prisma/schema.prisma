@@ -27,6 +27,7 @@ model Promoter {
   createdAt          DateTime            @default(now())
   visits             VisitRecord[]
   competitionReports CompetitionReport[]
+  trainingProgress   TrainingProgress[]
 }
 
 // Catálogo GLOBAL de tiendas (sin asignación por promotor). La visibilidad se
@@ -78,4 +79,28 @@ model CompetitionReport {
   createdAt   DateTime @default(now())
 
   @@index([promoterId])
+}
+
+// Progreso de Capacitación/Soporte de un promotor: una fila por pregunta de
+// quiz o tarjeta Leitner que ya intentó, para cada sección ("capacitacion" |
+// "soporte" — mismo tablero de contenido, distinto tema). `itemKey` es el
+// "Orden" de esa pregunta/tarjeta en la pestaña del Sheet correspondiente
+// (ver trainingSheet.js) — si el Sheet se reordena después, el progreso de
+// ese ítem podría desalinearse; es una limitación aceptada de tener el
+// contenido en un Sheet editable a mano, no de la base de datos.
+model TrainingProgress {
+  id         String   @id @default(uuid())
+  promoter   Promoter @relation(fields: [promoterId], references: [id])
+  promoterId String
+  seccion    String // "capacitacion" | "soporte"
+  tipo       String // "pregunta" | "flashcard"
+  itemKey    String // "Orden" de la pregunta/tarjeta en el Sheet
+  box        Int      @default(1) // Leitner (1-5): solo aplica a "flashcard"
+  attempts   Int      @default(0)
+  correct    Int      @default(0)
+  lastResult Boolean? // último intento: acertó/recordó o no
+  updatedAt  DateTime @updatedAt
+
+  @@unique([promoterId, seccion, tipo, itemKey])
+  @@index([promoterId, seccion])
 }

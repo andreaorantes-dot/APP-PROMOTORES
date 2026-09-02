@@ -84,6 +84,13 @@ export const config = {
     // Confirmaciones de "sigo en tienda" (alerta aleatoria 10am-4pm, solo
     // promotores) — ver presenceSheet.js.
     confirmacionTab: process.env.GOOGLE_SHEETS_CONFIRMACION_TAB ?? "Confirmación en tienda",
+    // Capacitación/Soporte (ver trainingSheet.js): bienvenida + bloques +
+    // tooltips en una pestaña, quiz y flashcards Leitner en las otras dos.
+    // Mismo contenido/estructura para ambas secciones ("capacitacion" |
+    // "soporte"), discriminado por la columna "Seccion" de cada pestaña.
+    capacitacionTab: process.env.GOOGLE_SHEETS_CAPACITACION_TAB ?? "Capacitacion",
+    capacitacionQuizTab: process.env.GOOGLE_SHEETS_CAPACITACION_QUIZ_TAB ?? "Capacitacion_Quiz",
+    capacitacionFlashcardsTab: process.env.GOOGLE_SHEETS_CAPACITACION_FLASHCARDS_TAB ?? "Capacitacion_Flashcards",
   },
 
   // --- Correo (reporte semanal para el admin) -------------------------------

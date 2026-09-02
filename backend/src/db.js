@@ -10,10 +10,11 @@ import { findPromoterInSheet, getAllPromotersFromSheet } from "./promotersSheet.
 import { ensureStoresSynced } from "./storesSheet.js";
 import { summarizeVisitRows } from "./managerSummary.js";
 import { fetchVisitRowsFromSheet } from "./activitySheet.js";
-import { todayKey, resolveRange, formatMexicoDateTime } from "./businessDay.js";
+import { todayKey, resolveRange, formatMexicoDateTime, dayKeyOf } from "./businessDay.js";
 import { getPromoterGoal, getStoreGoal, setPromoterGoal as setPromoterGoalInSheet, DEFAULT_WEEKLY_GOAL_ROLLOS, goalUnits } from "./goalsSheet.js";
 import { appendNotification, hasGoalNotification } from "./notificationsSheet.js";
 import { appendCompetitionRow } from "./competitionSheet.js";
+import { getTrainingContent, getTrainingQuiz, getTrainingFlashcards } from "./trainingSheet.js";
 
 // --- Promotores ------------------------------------------------------------
 
@@ -63,10 +64,13 @@ export async function getVisit(promoterId, storeId) {
 }
 
 // Con AUTH_SOURCE=sheet los promotores viven en el Google Sheet, no en
-// Postgres, pero VisitRecord/CompetitionReport tienen una llave foránea a
-// Promoter. Asegura que exista su fila local (con el hash del Sheet) para no
-// violar esa restricción al guardar. Idempotente: si ya existe, no toca nada.
-async function ensurePromoterExistsLocally(promoterId) {
+// Postgres, pero VisitRecord/CompetitionReport/TrainingProgress tienen una
+// llave foránea a Promoter. Asegura que exista su fila local (con el hash del
+// Sheet) para no violar esa restricción al guardar — se necesita antes de
+// CUALQUIER escritura con esa llave foránea, no solo check-in/check-out (ver
+// routes/training.js: un promotor puede entrar a Capacitación antes de su
+// primer check-in). Idempotente: si ya existe, no toca nada más que refrescar.
+export async function ensurePromoterExistsLocally(promoterId) {
   if (config.authSource !== "sheet") return;
   const p = await findPromoterInSheet(promoterId);
   if (!p) return;
@@ -330,6 +334,28 @@ export async function notifyCheckIn(promoterId, storeId, checkInTime = new Date(
   }
 }
 
+// Foto del check-in correspondiente a una notificación "checkin". La
+// notificación (Google Sheets) no guarda el id de la visita, así que se
+// reconstruye la búsqueda con la MISMA llave única de VisitRecord
+// (promoterId+storeId+day, ver @@unique en schema.prisma) — el día se deriva
+// de `fecha` con la misma zona horaria de negocio (America/Mexico_City) que
+// usa todo lo demás. Best-effort: null si no hay match o algo falla, nunca
+// lanza (no debe romper la campana de notificaciones).
+export async function getCheckinPhoto(promoterId, storeId, fecha) {
+  if (!promoterId || !storeId || !fecha) return null;
+  try {
+    const day = dayKeyOf(new Date(fecha));
+    const rec = await prisma.visitRecord.findUnique({
+      where: { promoterId_storeId_day: { promoterId, storeId, day } },
+      select: { photo: true },
+    });
+    return rec?.photo ?? null;
+  } catch (e) {
+    console.error("[db] getCheckinPhoto falló:", e.message);
+    return null;
+  }
+}
+
 // Unidades-equivalentes (rollos + cubetas ponderadas, ver goalUnits) que un
 // promotor lleva vendidas ESTA SEMANA, siempre desde la base de datos real
 // (el check-out de un promotor ya escribe ahí sin importar VISITS_SOURCE —
@@ -433,12 +459,19 @@ export async function getPromoterProfile(promoterId, limit = 200) {
   }
   const frequentStores = [...storeCounts.values()].sort((a, b) => b.visits - a.visits).slice(0, 8);
 
+  // `history` ya viene ordenado más reciente primero, así que su primer
+  // elemento ES la última visita — reusamos esa fila (ya la trajo Prisma) en
+  // vez de una consulta aparte. Se manda como campo SUELTO (no dentro de cada
+  // fila de `history`) para no inflar el payload con una foto por visita.
+  const latestPhoto = history[0]?.photo ?? null;
+
   return {
     id: promoter.id,
     name: promoter.name,
     location: promoter.location ?? null,
     supervisor: promoter.supervisor ?? null,
     frequentStores,
+    latestPhoto,
     history: history.map((v) => ({
       day: v.day,
       storeId: v.storeId,
@@ -458,4 +491,27 @@ export async function getPromoterProfile(promoterId, limit = 200) {
 export async function promoterBelongsToSupervisor(promoterId, supervisorId) {
   const promoter = await findPromoterById(promoterId);
   return (promoter?.supervisor || "").trim().toLowerCase() === supervisorId;
+}
+
+// --- Capacitación / Soporte: resumen de progreso ---------------------------
+// Cuánto ha avanzado ESTE promotor en cada paso (Aprender/Practicar/Repasar)
+// de una sección, contra el total real de contenido — para que las pestañas
+// se vean "llenándose" conforme usa la app. "Dominada" para preguntas =
+// acertó al menos una vez; para flashcards = llegó a la caja 3 de 5 (Leitner:
+// ya no la olvida tan seguido). "Vista" para bloques = ya la mostró una vez.
+export async function getTrainingProgressSummary(promoterId, seccion) {
+  const [content, quiz, flashcards, progreso] = await Promise.all([
+    getTrainingContent(seccion),
+    getTrainingQuiz(seccion),
+    getTrainingFlashcards(seccion),
+    prisma.trainingProgress.findMany({ where: { promoterId, seccion } }),
+  ]);
+  const seenBlocks = new Set(progreso.filter((p) => p.tipo === "bloque").map((p) => p.itemKey));
+  const masteredQuiz = new Set(progreso.filter((p) => p.tipo === "pregunta" && p.correct > 0).map((p) => p.itemKey));
+  const masteredCards = new Set(progreso.filter((p) => p.tipo === "flashcard" && p.box >= 3).map((p) => p.itemKey));
+  return {
+    aprender: { seen: seenBlocks.size, total: content.bloques.length },
+    practicar: { mastered: masteredQuiz.size, total: quiz.length },
+    repasar: { mastered: masteredCards.size, total: flashcards.length },
+  };
 }

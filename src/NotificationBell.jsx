@@ -36,6 +36,7 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState({ notifications: [], insight: null });
   const [seenAt, setSeenAt] = useState(() => Date.now());
+  const [zoomSrc, setZoomSrc] = useState(null);
   const boxRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -123,10 +124,28 @@ export default function NotificationBell() {
                     <p style={{ fontSize: 12.5, color: COLORS.text, margin: 0, lineHeight: 1.4 }}>{n.detalle}</p>
                     <span style={{ fontSize: 10.5, color: COLORS.textMuted }}>{timeAgo(n.fecha)}</span>
                   </div>
+                  {n.photo && (
+                    <button
+                      onClick={() => setZoomSrc(n.photo)}
+                      title="Ver foto del check-in"
+                      style={{ position: "relative", width: 36, height: 36, borderRadius: 8, overflow: "hidden", border: `1px solid ${COLORS.border}`, padding: 0, cursor: "pointer", background: COLORS.surface2, flexShrink: 0 }}
+                    >
+                      <img src={n.photo} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    </button>
+                  )}
                 </div>
               );
             })
           )}
+        </div>
+      )}
+
+      {zoomSrc && (
+        <div
+          onClick={(e) => { e.stopPropagation(); setZoomSrc(null); }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, cursor: "zoom-out" }}
+        >
+          <img src={zoomSrc} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8 }} />
         </div>
       )}
     </div>
