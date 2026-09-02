@@ -210,6 +210,15 @@ export const api = {
   trainingProgressSummary: (seccion, signal) => request(`/training/${seccion}/progress-summary`, { signal }),
   trainingProgress: (seccion, { tipo, orden, correct }) =>
     request(`/training/${seccion}/progress`, { method: "POST", body: { tipo, orden, correct } }),
+
+  // --- Alertas automáticas de Retroalimentación (correo + push ntfy.sh) -----
+  feedbackAlerts: (signal) => request("/feedback-alerts", { signal }),
+  setFeedbackAlerts: ({ activo, temaNtfy }) =>
+    request("/feedback-alerts", { method: "PUT", body: { activo, temaNtfy } }),
+  addFeedbackAlertRecipient: (nombre, email) =>
+    request("/feedback-alerts/destinatarios", { method: "POST", body: { nombre, email } }),
+  removeFeedbackAlertRecipient: (email) =>
+    request(`/feedback-alerts/destinatarios/${encodeURIComponent(email)}`, { method: "DELETE" }),
 };
 
 export { ApiError };

@@ -30,6 +30,7 @@ import {
 import NotificationBell from "./NotificationBell.jsx";
 import PromoterProfile from "./PromoterProfile.jsx";
 import CompetenciaPanel from "./CompetenciaPanel.jsx";
+import FeedbackAlertsPanel from "./FeedbackAlertsPanel.jsx";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
 
 // Onboarding del ADMIN/GERENTE — sube la versión cuando se agreguen features.
@@ -299,6 +300,7 @@ export default function ManagerDashboard() {
           </button>
           <NotificationBell />
           <CompetenciaPanel fetcher={api.managerCompetencia} />
+          <FeedbackAlertsPanel />
           <button
             onClick={() => load()}
             disabled={loading}

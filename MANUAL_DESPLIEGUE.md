@@ -267,3 +267,32 @@ despierto, no necesita un Cron Job nuevo de Render).
 - No hay retención/limpieza automática de backups viejos — se acumulan en la
   carpeta "Backup" indefinidamente; si eso se vuelve un problema, agregar esa
   lógica al mismo script (borrar archivos con más de N días).
+
+## Alertas automáticas de Retroalimentación (correo + push)
+
+Igual que el backup: **es otro Google Apps Script** vinculado al mismo Sheet,
+no algo que corra en Render. Revisa la pestaña "Retroalimentacion" cada pocos
+minutos y, si hay reportes nuevos, manda correo (`MailApp`, sin SMTP) y un
+push a [ntfy.sh](https://ntfy.sh) a quien esté configurado.
+
+- **Código completo**: `backend/scripts/apps-script-alertas-retroalimentacion.gs`
+  — instrucciones de instalación dentro del propio archivo (Extensiones →
+  Apps Script → pegar el código → crear un trigger de tiempo cada 5 minutos
+  que llame a `revisarRetroalimentacionNueva`).
+- **Quién recibe la alerta y si está prendida o apagada** se administra desde
+  el tablero de admin (botón de la campanita 🔔 "Alertas de Retroalimentación"
+  en `ManagerDashboard.jsx`), NO editando el Sheet a mano. Ese botón
+  lee/escribe dos pestañas nuevas que el backend crea solas la primera vez:
+  - `AlertasRetroConfig`: una sola fila de datos, `Activo` (SI/NO) y
+    `TemaNtfy` (el "tema" de ntfy.sh al que se manda el push).
+  - `AlertasRetroDestinatarios`: una fila por correo que debe recibir la
+    alerta (`Nombre`, `Email`).
+- **Para recibir el push en el teléfono**: instalar la app **ntfy** (iOS o
+  Android) o abrir `ntfy.sh` en el navegador, y suscribirse al tema exacto
+  que aparece en el panel de alertas del tablero. Los temas de ntfy.sh son
+  públicos (cualquiera que sepa el nombre puede suscribirse) — por eso se
+  genera uno aleatorio y difícil de adivinar por defecto; no lo compartas
+  fuera del equipo.
+- La primera vez que corre el script NO manda nada (solo marca la fila
+  actual como punto de partida), para no reenviar de golpe todo el
+  historial viejo de retroalimentación.

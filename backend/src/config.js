@@ -91,6 +91,11 @@ export const config = {
     capacitacionTab: process.env.GOOGLE_SHEETS_CAPACITACION_TAB ?? "Capacitacion",
     capacitacionQuizTab: process.env.GOOGLE_SHEETS_CAPACITACION_QUIZ_TAB ?? "Capacitacion_Quiz",
     capacitacionFlashcardsTab: process.env.GOOGLE_SHEETS_CAPACITACION_FLASHCARDS_TAB ?? "Capacitacion_Flashcards",
+    // Alertas automáticas de Retroalimentación (correo + push vía ntfy.sh),
+    // disparadas por un Google Apps Script atado al Sheet — ver
+    // feedbackAlertsSheet.js y MANUAL_DESPLIEGUE.md para el script exacto.
+    alertasRetroConfigTab: process.env.GOOGLE_SHEETS_ALERTAS_RETRO_CONFIG_TAB ?? "AlertasRetroConfig",
+    alertasRetroDestinatariosTab: process.env.GOOGLE_SHEETS_ALERTAS_RETRO_DESTINATARIOS_TAB ?? "AlertasRetroDestinatarios",
   },
 
   // --- Correo (reporte semanal para el admin) -------------------------------
