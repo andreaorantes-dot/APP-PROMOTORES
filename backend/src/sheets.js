@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { config } from "./config.js";
-import { formatMexicoDateTime } from "./businessDay.js";
+import { formatMexicoDateTime, timeZoneForEstado } from "./businessDay.js";
  
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
  
@@ -185,13 +185,20 @@ export async function appendVisitRow({ promoter, store, storeId, checkInTime, ch
   try {
     const sheets = await getSheetsClient();
     await ensureHeader(sheets);
+    // Hora entrada/salida en la zona horaria REAL del promotor (no siempre
+    // Ciudad de México — ver timeZoneForEstado): así coincide con su horario
+    // de "Entrada"/"Salida" (también local) y con el "día" que le asigna
+    // submitVisitReport en la base de datos. "registrado_en" sí se deja fijo
+    // en hora de México: es solo cuándo se escribió la fila, no la hora de la
+    // visita, y sirve de referencia única para ordenar/auditar entre estados.
+    const promoterTz = timeZoneForEstado(promoter?.estado);
     const row = [
       formatMexicoDateTime(new Date()), // registrado_en (hora de México, no UTC)
       promoter.id, // ID promotor
       promoter.name, // Nombre promotor
       store?.name ?? storeId, // Tienda
-      formatMexicoDateTime(checkInTime), // Hora entrada (hora de México)
-      checkOutTime ? formatMexicoDateTime(checkOutTime) : "0", // Hora salida: "0" = check-in todavía abierto
+      formatMexicoDateTime(checkInTime, promoterTz), // Hora entrada (hora local del promotor)
+      checkOutTime ? formatMexicoDateTime(checkOutTime, promoterTz) : "0", // Hora salida: "0" = check-in todavía abierto
       rollos ?? 0, // Inventario: rollos
       cubetas ?? 0, // Inventario: cubetas
     ];

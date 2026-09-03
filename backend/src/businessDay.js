@@ -1,77 +1,133 @@
 // ---------------------------------------------------------------------------
-// "Día" del negocio en hora de México (NO UTC).
+// "Día" del negocio en hora local (NO UTC).
 // ---------------------------------------------------------------------------
 // Con UTC, cualquier check-in/check-out después de ~18:00 hora local ya cae en
 // la fecha UTC del día siguiente, corriendo esa actividad al resumen
 // equivocado. Todo el sistema (check-in, check-out, resumen del gerente, e
 // importación desde el Sheet) usa esta misma función para que el "día" sea
 // consistente en todos lados.
+//
+// México tiene VARIAS zonas horarias (no solo la de Ciudad de México), y
+// Sonora en particular nunca cambia de horario de verano — así que un
+// check-in tarde en la noche de un promotor en, por ejemplo, Sonora o Baja
+// California puede caer en la fecha "de mañana" según Ciudad de México
+// aunque para el promotor todavía sea "hoy". Por default todo usa la zona de
+// Ciudad de México (BUSINESS_TIMEZONE, la referencia del negocio/oficina),
+// pero cada función acepta un `timeZone` explícito — usar
+// `timeZoneForEstado(promoter.estado)` para operaciones atadas a UN promotor
+// en particular (día del check-in, puntualidad, etc.).
 const BUSINESS_TIMEZONE = "America/Mexico_City";
-const dayFormatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: BUSINESS_TIMEZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
 
-export function dayKeyOf(date) {
-  return dayFormatter.format(date);
+// Estados de México cuya zona horaria real NO coincide con Ciudad de México
+// (Zona Centro, UTC-6). El resto del país (incluyendo Nuevo León, Tamaulipas,
+// Coahuila: aunque tienen franjas fronterizas con horario de verano, nuestros
+// promotores ahí operan en ciudades del interior, no en el municipio
+// fronterizo) cae en el default de BUSINESS_TIMEZONE.
+//   - Sonora: Zona Pacífico, UTC-7 TODO el año (nunca cambia de horario).
+//   - Baja California: Zona Noroeste, UTC-8/UTC-7 con horario de verano
+//     (alineada a California, EUA).
+//   - Baja California Sur, Chihuahua (interior), Sinaloa, Nayarit: Zona
+//     Pacífico, UTC-7, sin horario de verano.
+//   - Quintana Roo: Zona Sureste, UTC-5, sin horario de verano.
+const MEXICO_STATE_TIMEZONES = {
+  "Sonora": "America/Hermosillo",
+  "Baja California": "America/Tijuana",
+  "Baja California Sur": "America/Mazatlan",
+  "Chihuahua": "America/Chihuahua",
+  "Sinaloa": "America/Mazatlan",
+  "Nayarit": "America/Mazatlan",
+  "Quintana Roo": "America/Cancun",
+};
+
+// Zona horaria real para el ESTADO de un promotor/tienda (columna "Estado").
+// Sin estado, o estado no listado arriba (la mayoría del país): la zona de
+// negocio por default (Ciudad de México).
+export function timeZoneForEstado(estado) {
+  return MEXICO_STATE_TIMEZONES[String(estado ?? "").trim()] || BUSINESS_TIMEZONE;
 }
 
-export function todayKey() {
-  return dayKeyOf(new Date());
+// Cachés de formatters por zona horaria (Intl.DateTimeFormat es caro de
+// construir; con ~6 zonas en juego, vale la pena no recrearlo en cada llamada).
+const dayFormatterCache = new Map();
+function dayFormatterFor(timeZone) {
+  let f = dayFormatterCache.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
+    dayFormatterCache.set(timeZone, f);
+  }
+  return f;
 }
 
-// Fecha+hora completas en hora de México, como texto plano "YYYY-MM-DD HH:mm:ss"
-// (sin "Z" ni offset) — para escribir en el Sheet. A propósito NO es ISO: si
-// lleváramos el offset, Sheets/Excel a veces lo re-interpreta o lo ignora al
-// graficar/ordenar; como texto plano en hora local, lo que ves es lo que es.
-const dateTimeFormatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: BUSINESS_TIMEZONE,
-  year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", second: "2-digit",
-  hour12: false,
-});
+export function dayKeyOf(date, timeZone = BUSINESS_TIMEZONE) {
+  return dayFormatterFor(timeZone).format(date);
+}
 
-export function formatMexicoDateTime(date) {
+export function todayKey(timeZone = BUSINESS_TIMEZONE) {
+  return dayKeyOf(new Date(), timeZone);
+}
+
+// Fecha+hora completas en hora LOCAL (de `timeZone`), como texto plano
+// "YYYY-MM-DD HH:mm:ss" (sin "Z" ni offset) — para escribir en el Sheet. A
+// propósito NO es ISO: si lleváramos el offset, Sheets/Excel a veces lo
+// re-interpreta o lo ignora al graficar/ordenar; como texto plano en hora
+// local, lo que ves es lo que es.
+const dateTimeFormatterCache = new Map();
+function dateTimeFormatterFor(timeZone) {
+  let f = dateTimeFormatterCache.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false,
+    });
+    dateTimeFormatterCache.set(timeZone, f);
+  }
+  return f;
+}
+
+export function formatMexicoDateTime(date, timeZone = BUSINESS_TIMEZONE) {
   if (!date) return "";
   const d = typeof date === "string" || typeof date === "number" ? new Date(date) : date;
   if (Number.isNaN(d?.getTime?.())) return "";
-  const parts = Object.fromEntries(dateTimeFormatter.formatToParts(d).map((p) => [p.type, p.value]));
+  const parts = Object.fromEntries(dateTimeFormatterFor(timeZone).formatToParts(d).map((p) => [p.type, p.value]));
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
-// Inverso de formatMexicoDateTime: toma "YYYY-MM-DD HH:mm:ss" (hora de
-// México, sin offset) y devuelve el instante real (Date, en UTC internamente
-// como cualquier Date de JS). No asume "-6" a mano: calcula el offset real de
-// América/Ciudad_de_México en ese instante vía Intl, por si algún día cambia.
-export function parseMexicoDateTime(str) {
+// Inverso de formatMexicoDateTime: toma "YYYY-MM-DD HH:mm:ss" (hora local de
+// `timeZone`, sin offset) y devuelve el instante real (Date, en UTC
+// internamente como cualquier Date de JS). No asume el offset a mano: calcula
+// el offset real de esa zona en ese instante vía Intl, por si algún día
+// cambia (o si la zona sí observa horario de verano).
+export function parseMexicoDateTime(str, timeZone = BUSINESS_TIMEZONE) {
   if (!str) return null;
   const [datePart, timePart] = String(str).trim().split(" ");
   const [y, m, d] = (datePart || "").split("-").map(Number);
   const [h, min, s] = (timePart || "00:00:00").split(":").map(Number);
   if (!y || !m || !d) return null;
   const guessUtc = new Date(Date.UTC(y, m - 1, d, h || 0, min || 0, s || 0));
-  const parts = Object.fromEntries(dateTimeFormatter.formatToParts(guessUtc).map((p) => [p.type, p.value]));
-  const guessAsMexicoWallClock = Date.UTC(
+  const parts = Object.fromEntries(dateTimeFormatterFor(timeZone).formatToParts(guessUtc).map((p) => [p.type, p.value]));
+  const guessAsLocalWallClock = Date.UTC(
     Number(parts.year), Number(parts.month) - 1, Number(parts.day),
     Number(parts.hour), Number(parts.minute), Number(parts.second)
   );
-  const offsetMs = guessUtc.getTime() - guessAsMexicoWallClock;
+  const offsetMs = guessUtc.getTime() - guessAsLocalWallClock;
   return new Date(guessUtc.getTime() + offsetMs);
 }
 
 // Interpreta una fecha/hora tal como viene guardada en el Sheet, sin importar
-// si es una fila vieja (ISO/UTC, con "T" y "Z") o una nueva (hora de México en
+// si es una fila vieja (ISO/UTC, con "T" y "Z") o una nueva (hora local en
 // texto plano, escrita por formatMexicoDateTime) — para no romper filas
-// escritas antes de este cambio. Devuelve un Date real o null.
-export function parseSheetDateTime(str) {
+// escritas antes de este cambio. `timeZone` debe ser la MISMA zona con la que
+// se escribió la fila (ver timeZoneForEstado) para reconstruir el instante
+// real correctamente. Devuelve un Date real o null.
+export function parseSheetDateTime(str, timeZone = BUSINESS_TIMEZONE) {
   if (!str) return null;
   if (String(str).includes("T")) {
     const d = new Date(str);
     return Number.isNaN(d.getTime()) ? null : d;
   }
-  return parseMexicoDateTime(str);
+  return parseMexicoDateTime(str, timeZone);
 }
 
 // Día de la semana (0=lunes ... 6=domingo) de una clave "YYYY-MM-DD". Se

@@ -29,7 +29,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { config } from "./config.js";
 import { prisma } from "./prisma.js";
-import { dayKeyOf, parseSheetDateTime } from "./businessDay.js";
+import { dayKeyOf, parseSheetDateTime, timeZoneForEstado } from "./businessDay.js";
 import { getAllPromotersFromSheet } from "./promotersSheet.js";
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"];
@@ -98,20 +98,26 @@ export async function fetchVisitRowsFromSheet({ from, to }) {
     const [registradoEn, promoterId, promoterName, storeName, horaEntrada, horaSalida, rollosRaw, cubetasRaw] = rows[r] || [];
     if (!promoterId || !storeName) continue; // fila vacía/incompleta
 
+    const pid = String(promoterId).trim();
+    // Zona horaria REAL de este promotor (ver timeZoneForEstado) — necesaria
+    // tanto para interpretar horaEntrada/horaSalida (filas nuevas: texto
+    // plano en hora local del promotor, ver appendVisitRow en sheets.js) como
+    // para derivar a qué "día" pertenece la visita.
+    const tz = timeZoneForEstado(promotersById.get(pid)?.estado);
+
     // registrado_en/hora_entrada/hora_salida pueden venir en dos formatos:
-    // ISO/UTC (filas viejas, con "T") o texto plano en hora de México (filas
+    // ISO/UTC (filas viejas, con "T") o texto plano en hora local (filas
     // nuevas, ver formatMexicoDateTime en sheets.js) — parseSheetDateTime
     // entiende ambos y siempre devuelve un instante real sin ambigüedad.
     // "0" (la fila del check-in, visita abierta) también cae en null aquí.
-    const checkInDate = parseSheetDateTime(horaEntrada) || parseSheetDateTime(registradoEn);
-    const checkOutDate = parseSheetDateTime(horaSalida);
+    const checkInDate = parseSheetDateTime(horaEntrada, tz) || parseSheetDateTime(registradoEn, tz);
+    const checkOutDate = parseSheetDateTime(horaSalida, tz);
     if (!checkInDate) continue; // fila con fecha ilegible: se descarta, no se rompe
-    const rowDay = dayKeyOf(checkInDate);
+    const rowDay = dayKeyOf(checkInDate, tz);
     if (rowDay < from || rowDay > to) continue; // comparación lexicográfica válida en "YYYY-MM-DD"
 
     const match = storeByName.get(String(storeName).trim().toLowerCase());
     const storeId = match?.id ?? slugify(storeName);
-    const pid = String(promoterId).trim();
     const key = `${pid}|${storeId}|${rowDay}`;
 
     const candidate = {

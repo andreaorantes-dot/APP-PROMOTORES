@@ -10,7 +10,7 @@ import { findPromoterInSheet, getAllPromotersFromSheet } from "./promotersSheet.
 import { ensureStoresSynced } from "./storesSheet.js";
 import { summarizeVisitRows } from "./managerSummary.js";
 import { fetchVisitRowsFromSheet } from "./activitySheet.js";
-import { todayKey, resolveRange, formatMexicoDateTime, dayKeyOf } from "./businessDay.js";
+import { todayKey, resolveRange, formatMexicoDateTime, dayKeyOf, timeZoneForEstado } from "./businessDay.js";
 import { getPromoterGoal, getStoreGoal, setPromoterGoal as setPromoterGoalInSheet, DEFAULT_WEEKLY_GOAL_ROLLOS, goalUnits } from "./goalsSheet.js";
 import { appendNotification, hasGoalNotification } from "./notificationsSheet.js";
 import { appendCompetitionRow } from "./competitionSheet.js";
@@ -48,9 +48,28 @@ export async function getStore(storeId) {
 
 // --- Visitas ---------------------------------------------------------------
 
+// Zona horaria REAL del promotor (según su "Estado" en el Sheet/Postgres), no
+// la de Ciudad de México a secas — ver comentario en timeZoneForEstado. Se usa
+// para que el "día" de negocio de un check-in/check-out de, por ejemplo,
+// Sonora o Baja California, se calcule con SU medianoche, no la de la CDMX.
+// Barata: el Sheet ya está cacheado (promotersSheet.js) y en Postgres es un
+// solo SELECT por id.
+async function getPromoterTimeZone(promoterId) {
+  let estado = null;
+  if (config.authSource === "sheet") {
+    const p = await findPromoterInSheet(promoterId);
+    estado = p?.estado ?? null;
+  } else {
+    const p = await prisma.promoter.findUnique({ where: { id: promoterId }, select: { estado: true } });
+    estado = p?.estado ?? null;
+  }
+  return timeZoneForEstado(estado);
+}
+
 export async function fetchTodayVisits(promoterId) {
+  const tz = await getPromoterTimeZone(promoterId);
   const rows = await prisma.visitRecord.findMany({
-    where: { promoterId, day: todayKey() },
+    where: { promoterId, day: todayKey(tz) },
   });
   const out = {};
   for (const r of rows) out[r.storeId] = r;
@@ -58,8 +77,9 @@ export async function fetchTodayVisits(promoterId) {
 }
 
 export async function getVisit(promoterId, storeId) {
+  const tz = await getPromoterTimeZone(promoterId);
   return prisma.visitRecord.findUnique({
-    where: { promoterId_storeId_day: { promoterId, storeId, day: todayKey() } },
+    where: { promoterId_storeId_day: { promoterId, storeId, day: todayKey(tz) } },
   });
 }
 
@@ -93,7 +113,8 @@ export async function ensurePromoterExistsLocally(promoterId) {
 // Crea o actualiza (upsert) el registro de visita del día. Convierte los campos
 // de fecha a Date para Prisma. Devuelve el registro persistido.
 export async function submitVisitReport(promoterId, storeId, patch) {
-  const day = todayKey();
+  const tz = await getPromoterTimeZone(promoterId);
+  const day = todayKey(tz);
   const data = { ...patch };
   if (typeof data.checkInTime === "string") data.checkInTime = new Date(data.checkInTime);
   if (typeof data.checkOutTime === "string") data.checkOutTime = new Date(data.checkOutTime);
@@ -297,13 +318,17 @@ function minutesOfDay(hhmm) {
 }
 
 // Texto de puntualidad para la notificación de check-in, comparando la hora
-// real (en hora de México) contra la "Entrada" esperada del promotor, con
-// LATE_TOLERANCE_MINUTES de tolerancia. Cadena vacía si el promotor no tiene
-// horario configurado (no se le exige nada).
+// real EN LA ZONA HORARIA DEL PROMOTOR (no la de Ciudad de México a secas:
+// "Entrada" es un horario local, así que hay que compararlo contra la hora
+// local real del promotor — de lo contrario, un promotor en Sonora o Baja
+// California siempre saldría "tarde" o "temprano" por el desfase de zona)
+// contra la "Entrada" esperada del promotor, con LATE_TOLERANCE_MINUTES de
+// tolerancia. Cadena vacía si el promotor no tiene horario configurado (no se
+// le exige nada).
 function puntualidadTexto(promoter, checkInTime) {
   const entradaMin = minutesOfDay(promoter?.entrada);
   if (entradaMin == null) return "";
-  const horaLocal = formatMexicoDateTime(checkInTime).slice(11, 16); // "HH:mm"
+  const horaLocal = formatMexicoDateTime(checkInTime, timeZoneForEstado(promoter?.estado)).slice(11, 16); // "HH:mm"
   const checkInMin = minutesOfDay(horaLocal);
   if (checkInMin == null) return "";
   const diff = checkInMin - entradaMin;
@@ -338,13 +363,16 @@ export async function notifyCheckIn(promoterId, storeId, checkInTime = new Date(
 // notificación (Google Sheets) no guarda el id de la visita, así que se
 // reconstruye la búsqueda con la MISMA llave única de VisitRecord
 // (promoterId+storeId+day, ver @@unique en schema.prisma) — el día se deriva
-// de `fecha` con la misma zona horaria de negocio (America/Mexico_City) que
-// usa todo lo demás. Best-effort: null si no hay match o algo falla, nunca
-// lanza (no debe romper la campana de notificaciones).
+// de `fecha` con la MISMA zona horaria del promotor que usó submitVisitReport
+// al guardar (ver getPromoterTimeZone), para que la llave coincida incluso en
+// estados con otra zona horaria (Sonora, Baja California, etc.). Best-effort:
+// null si no hay match o algo falla, nunca lanza (no debe romper la campana
+// de notificaciones).
 export async function getCheckinPhoto(promoterId, storeId, fecha) {
   if (!promoterId || !storeId || !fecha) return null;
   try {
-    const day = dayKeyOf(new Date(fecha));
+    const tz = await getPromoterTimeZone(promoterId);
+    const day = dayKeyOf(new Date(fecha), tz);
     const rec = await prisma.visitRecord.findUnique({
       where: { promoterId_storeId_day: { promoterId, storeId, day } },
       select: { photo: true },
