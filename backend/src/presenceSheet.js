@@ -2,8 +2,11 @@
 // Confirmaciones de "sigo en tienda" — Google Sheets ("Confirmación en tienda").
 // ---------------------------------------------------------------------------
 // La app del promotor le muestra, una vez al día en un momento aleatorio
-// entre 10am y 4pm (mientras tiene un check-in abierto), un mensaje corto
-// pidiéndole confirmar que sigue ahí. Al aceptar, se guarda una fila aquí.
+// entre 10am y 4pm (mientras tiene un check-in abierto), la pregunta "¿sigues
+// en la tienda?" (Sí/No). Al responder cualquiera de las dos, se captura su
+// GPS en ese momento y se guarda una fila aquí con la respuesta y esa
+// ubicación — a diferencia del check-in, esto NO se revalida contra el radio
+// de la tienda (si responde "No" lo normal es que ya esté fuera de rango).
 // A diferencia del check-out, SÍ propagamos el error al caller (mismo
 // criterio que retroalimentación): es el registro que importa, no queremos
 // que falle en silencio sin que el promotor se entere.
@@ -13,7 +16,7 @@ import { config } from "./config.js";
 import { formatMexicoDateTime } from "./businessDay.js";
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
-const HEADERS = ["registrado_en", "id_promotor", "nombre", "supervisor", "id_tienda", "tienda"];
+const HEADERS = ["registrado_en", "id_promotor", "nombre", "supervisor", "id_tienda", "tienda", "ubicacion", "sigue_en_tienda"];
 
 let clientPromise = null;
 let tabEnsured = false;
@@ -67,8 +70,10 @@ async function ensureTab(sheets) {
 }
 
 // Agrega una fila de confirmación. Lanza si falla (el caller decide qué
-// responderle al promotor) — ver comentario arriba.
-export async function appendPresenceConfirmation({ promoterId, promoterName, supervisor, storeId, storeName }) {
+// responderle al promotor) — ver comentario arriba. `coords` es
+// {lat,lng} | null (best-effort: si el GPS falla o lo niega, se guarda vacío,
+// no se bloquea la respuesta) y `sigueEnTienda` es boolean.
+export async function appendPresenceConfirmation({ promoterId, promoterName, supervisor, storeId, storeName, coords, sigueEnTienda }) {
   if (!isConfigured()) {
     throw new Error("La integración con Google Sheets no está configurada (faltan credenciales o GOOGLE_SHEETS_ID).");
   }
@@ -81,6 +86,8 @@ export async function appendPresenceConfirmation({ promoterId, promoterName, sup
     supervisor || "",
     storeId,
     storeName,
+    coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng) ? `${coords.lat},${coords.lng}` : "",
+    sigueEnTienda ? "Sí" : "No",
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId: config.sheets.spreadsheetId,

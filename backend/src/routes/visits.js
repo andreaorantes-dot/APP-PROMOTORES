@@ -189,14 +189,19 @@ router.post("/:storeId/check-out", async (req, res) => {
   }
 });
 
-// POST /api/visits/:storeId/confirm-presence
+// POST /api/visits/:storeId/confirm-presence  { coords?, sigueEnTienda }
 // Confirmación de "sigo en tienda" — la dispara el cliente una vez al día, en
 // un momento aleatorio entre 10am y 4pm, solo mientras el promotor tiene un
-// check-in abierto en esa tienda. No pide coordenadas ni las revalida contra
-// el radio: es un check de presencia liviano (¿sigues activo en la app?), no
-// una repetición del check-in geolocalizado.
+// check-in abierto en esa tienda, preguntándole Sí/No. `coords` es best-effort
+// (el cliente intenta tomar el GPS al responder, pero si falla o lo niega, NO
+// se bloquea la respuesta) y no se revalida contra el radio de la tienda: si
+// contesta "No", lo esperable es que ya esté fuera de rango.
 router.post("/:storeId/confirm-presence", async (req, res) => {
   try {
+    const { coords, sigueEnTienda } = req.body ?? {};
+    if (typeof sigueEnTienda !== "boolean") {
+      return res.status(400).json({ message: "Falta indicar si sigue en la tienda (sí/no)." });
+    }
     const existing = await getVisit(req.promoter.id, req.params.storeId);
     if (existing?.status !== "checked-in") {
       return res.status(409).json({ message: "No tienes una visita abierta en esa tienda" });
@@ -211,8 +216,10 @@ router.post("/:storeId/confirm-presence", async (req, res) => {
       supervisor: promoter?.supervisor || "",
       storeId: req.params.storeId,
       storeName: store?.name || req.params.storeId,
+      coords: isValidCoords(coords) ? coords : null,
+      sigueEnTienda,
     });
-    console.log(`[confirm-presence] OK promotor=${req.promoter.id} tienda=${req.params.storeId}`);
+    console.log(`[confirm-presence] OK promotor=${req.promoter.id} tienda=${req.params.storeId} sigueEnTienda=${sigueEnTienda}`);
     return res.status(204).end();
   } catch (err) {
     console.error(`[confirm-presence] FALLÓ promotor=${req.promoter?.id} tienda=${req.params.storeId}:`, err?.message);

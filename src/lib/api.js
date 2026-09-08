@@ -130,10 +130,14 @@ export const api = {
   // Today's visit records for the signed-in promoter.
   visitsToday: (signal) => request("/visits/today", { signal }),
 
-  // Confirma "sigo en tienda" (alerta aleatoria 10am-4pm). Requiere que el
-  // promotor tenga un check-in abierto en esa tienda.
-  confirmPresence: (storeId) =>
-    request(`/visits/${encodeURIComponent(storeId)}/confirm-presence`, { method: "POST" }),
+  // Confirma "sigo en tienda" (alerta aleatoria 10am-4pm): responde Sí/No y,
+  // si se pudo tomar, la ubicación GPS del momento. Requiere que el promotor
+  // tenga un check-in abierto en esa tienda.
+  confirmPresence: (storeId, { coords, sigueEnTienda }) =>
+    request(`/visits/${encodeURIComponent(storeId)}/confirm-presence`, {
+      method: "POST",
+      body: { coords, sigueEnTienda },
+    }),
 
   // Meta mensual (unidades) del promotor logueado y su avance del mes.
   // { target, achieved, reached } o null si no tiene meta asignada.

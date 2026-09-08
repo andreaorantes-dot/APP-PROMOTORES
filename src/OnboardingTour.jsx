@@ -39,7 +39,19 @@ export default function OnboardingTour({ steps, onClose }) {
           {Icon && <Icon size={24} color={COLORS.accentText} />}
         </div>
         <h3 style={{ fontSize: 18, fontWeight: 800, color: COLORS.text, margin: "0 0 8px", fontFamily: "Space Grotesk" }}>{step.title}</h3>
-        <p style={{ fontSize: 13.5, color: COLORS.textMuted, lineHeight: 1.55, margin: "0 0 20px" }}>{step.body}</p>
+        <p style={{ fontSize: 13.5, color: COLORS.textMuted, lineHeight: 1.55, margin: step.action ? "0 0 16px" : "0 0 20px" }}>{step.body}</p>
+
+        {/* Acción opcional del paso (ej. "Agregar a pantalla de inicio") —
+            la mayoría de los pasos no la traen, así que casi nunca se pinta. */}
+        {step.action && (
+          <button
+            onClick={step.action.onClick}
+            style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: `1px solid ${COLORS.accent}`, background: COLORS.accentSoft, color: COLORS.accentText, fontWeight: 700, fontSize: 13.5, cursor: "pointer", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}
+          >
+            {step.action.icon && <step.action.icon size={15} />}
+            {step.action.label}
+          </button>
+        )}
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", gap: 5 }}>

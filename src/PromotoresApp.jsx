@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound, Heart } from "lucide-react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound, Heart, HardDrive, Download } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
+import { usePwaInstall } from "./lib/pwaInstall.js";
 import { fmtDateTime } from "./dashboardShared.jsx";
 import TrainingSection from "./TrainingSection.jsx";
 import {
@@ -69,34 +70,91 @@ function gpsErrorMessage(err) {
   return "No se pudo obtener tu ubicación GPS.";
 }
 
-// Redimensiona la imagen capturada a un máximo de `maxDim` px (lado mayor) y la
-// devuelve como data URL JPEG. Reduce el peso antes de cifrarla/enviarla.
-function resizeImage(file, maxDim = 1024, quality = 0.7) {
+// ¿El navegador codifica WebP de verdad? Algunos navegadores viejos ignoran
+// el mime type pedido y devuelven PNG en silencio (sin comprimir nada) en vez
+// de fallar — hay que revisar el resultado, no solo asumir que funcionó. Se
+// calcula una sola vez y se cachea (canvas.toDataURL no es gratis).
+let webpSupported = null;
+function supportsWebP() {
+  if (webpSupported === null) {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 1;
+    webpSupported = canvas.toDataURL("image/webp").startsWith("data:image/webp");
+  }
+  return webpSupported;
+}
+
+// Dibuja una imagen ya decodificada (ImageBitmap o HTMLImageElement, ambos
+// exponen width/height y son válidos para drawImage) en un canvas de a lo más
+// `maxDim` px de lado mayor, y la codifica a WebP (respaldo a JPEG si el
+// navegador no lo soporta de verdad).
+function drawResized(source, maxDim, quality) {
+  let { width, height } = source;
+  if (width >= height && width > maxDim) {
+    height = Math.round((height * maxDim) / width);
+    width = maxDim;
+  } else if (height > maxDim) {
+    width = Math.round((width * maxDim) / height);
+    height = maxDim;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").drawImage(source, 0, 0, width, height);
+  const format = supportsWebP() ? "image/webp" : "image/jpeg";
+  return canvas.toDataURL(format, quality);
+}
+
+// Camino rápido: createImageBitmap decodifica directo del archivo (sin pasar
+// por un <img> del DOM ni por un string Base64 intermedio) y bitmap.close()
+// libera esa memoria de inmediato en cuanto ya se copió al canvas chico, en
+// vez de esperar a que el garbage collector se acuerde — justo el tipo de
+// pico de memoria que dispara "memoria insuficiente" en Chrome/Android al
+// procesar fotos de cámara de varios MB. `imageOrientation: "from-image"`
+// mantiene el mismo auto-rotado por EXIF que ya hacía <img> por su cuenta.
+async function resizeImageViaBitmap(file, maxDim, quality) {
+  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  try {
+    return drawResized(bitmap, maxDim, quality);
+  } finally {
+    bitmap.close();
+  }
+}
+
+// Respaldo para navegadores sin createImageBitmap (o que fallan al decodificar
+// con él). Usa un object URL — no FileReader.readAsDataURL — para no duplicar
+// el archivo ORIGINAL completo como un string Base64 en memoria solo para
+// decodificarlo.
+function resizeImageViaImageElement(file, maxDim, quality) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("No se pudo leer la imagen"));
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("Imagen inválida"));
-      img.onload = () => {
-        let { width, height } = img;
-        if (width >= height && width > maxDim) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else if (height > maxDim) {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      img.src = reader.result;
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Imagen inválida"));
     };
-    reader.readAsDataURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl); // ya decodificada: el archivo original ya no hace falta
+      resolve(drawResized(img, maxDim, quality));
+    };
+    img.src = objectUrl;
   });
+}
+
+// Redimensiona la imagen capturada a un máximo de `maxDim` px (lado mayor) y
+// la comprime a WebP (25-35% más liviano que JPEG a la misma calidad visual).
+// Reduce el peso antes de guardarla/enviarla — menos datos móviles del
+// promotor y menos espacio en Postgres (donde queda tal cual, en Base64).
+async function resizeImage(file, maxDim = 1024, quality = 0.7) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await resizeImageViaBitmap(file, maxDim, quality);
+    } catch {
+      // createImageBitmap no soportado para este archivo (formato raro, etc.)
+      // -> cae al respaldo de abajo, no se pierde el check-in por esto.
+    }
+  }
+  return resizeImageViaImageElement(file, maxDim, quality);
 }
 
 // La tipografía de marca es Helvetica (fuente de sistema); no se cargan fuentes
@@ -105,8 +163,8 @@ function useGoogleFonts() {}
 
 // Onboarding del PROMOTOR — sube la versión ("v1" -> "v2") cuando se agreguen
 // features nuevas para que todos la vuelvan a ver una vez.
-const ONBOARDING_KEY_PROMOTOR = "onboarding_seen_v1_promotor";
-const ONBOARDING_STEPS_PROMOTOR = [
+const ONBOARDING_KEY_PROMOTOR = "onboarding_seen_v2_promotor";
+const ONBOARDING_STEPS_PROMOTOR_BASE = [
   {
     icon: Navigation,
     title: "Bienvenido a la nueva versión",
@@ -121,6 +179,11 @@ const ONBOARDING_STEPS_PROMOTOR = [
     icon: BarChart3,
     title: "Reporta a la competencia",
     body: "Desde \"Competencia\" ya puedes subir hasta 5 fotos como evidencia; tu reporte se guarda automáticamente.",
+  },
+  {
+    icon: HardDrive,
+    title: "¿Se traba al tomar la foto?",
+    body: "Si tu teléfono te dice \"memoria insuficiente\" al tomar o subir la foto, libera espacio: Ajustes > Apps > Chrome > Almacenamiento > \"Borrar caché\" (NO \"Borrar datos\": eso sí te cerraría la sesión). Hazlo cada semana si tu teléfono anda justo de espacio.",
   },
 ];
 
@@ -373,6 +436,34 @@ export default function PromotoresApp() {
 
   const { status, user, error: authError, login, logout } = useAuth();
   const onboarding = useOnboarding(ONBOARDING_KEY_PROMOTOR);
+  const { canInstall, isStandalone, promptInstall } = usePwaInstall();
+
+  // Último paso del onboarding: instalar la app a la pantalla de inicio.
+  // Se arma aparte (no en la lista estática) porque su texto y su botón
+  // dependen de si el navegador puede ofrecer el instalado con un clic
+  // (Chrome/Android) o si ya está instalada — ninguno de los otros pasos
+  // depende de estado en vivo.
+  const onboardingStepsPromotor = useMemo(() => {
+    const installStep = isStandalone
+      ? {
+          icon: Download,
+          title: "Ya la tienes instalada",
+          body: "Perfecto: al abrirla desde el ícono de tu pantalla de inicio usa menos memoria que un tab de Chrome más.",
+        }
+      : canInstall
+        ? {
+            icon: Download,
+            title: "Agrégala a tu pantalla de inicio",
+            body: "Así abre como una app aparte (no como una pestaña más de Chrome) — arranca más rápido y usa menos memoria de tu teléfono.",
+            action: { label: "Agregar a pantalla de inicio", icon: Download, onClick: promptInstall },
+          }
+        : {
+            icon: Download,
+            title: "Agrégala a tu pantalla de inicio",
+            body: "Abre el menú (⋮) de Chrome y elige \"Instalar app\" o \"Agregar a pantalla de inicio\". Así abre como una app aparte y usa menos memoria de tu teléfono.",
+          };
+    return [...ONBOARDING_STEPS_PROMOTOR_BASE, installStep];
+  }, [canInstall, isStandalone, promptInstall]);
 
   const [screen, setScreen] = useState("dashboard");
   const [records, setRecords] = useState({});
@@ -471,12 +562,28 @@ export default function PromotoresApp() {
     return () => clearInterval(t);
   }, [status, user, openVisit, presenceModalOpen]);
 
-  async function handleConfirmPresence() {
+  // Intenta tomar el GPS en el momento en que el promotor responde — best-
+  // effort: si falla o lo niega, se sigue adelante sin ubicación en vez de
+  // bloquear la respuesta (a diferencia del check-in, aquí la ubicación es
+  // un dato adicional para el registro, no un requisito de la operación).
+  function getBestEffortCoords() {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    });
+  }
+
+  async function handleConfirmPresence(sigueEnTienda) {
     if (presenceSending || !openVisit) return;
     setPresenceSending(true);
     setPresenceError("");
     try {
-      await api.confirmPresence(openVisit.storeId);
+      const coords = await getBestEffortCoords();
+      await api.confirmPresence(openVisit.storeId, { coords, sigueEnTienda });
       localStorage.setItem(`presence_confirmed_${user.id}_${new Date().toLocaleDateString("en-CA")}`, "1");
       setPresenceModalOpen(false);
     } catch (e) {
@@ -495,18 +602,27 @@ export default function PromotoresApp() {
         <div style={{ width: 52, height: 52, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px" }}>
           <Heart size={24} />
         </div>
-        <h3 style={{ fontFamily: "Space Grotesk", fontSize: 17, fontWeight: 600, color: COLORS.text, margin: "0 0 8px" }}>¿Todo bien por allá?</h3>
+        <h3 style={{ fontFamily: "Space Grotesk", fontSize: 17, fontWeight: 600, color: COLORS.text, margin: "0 0 8px" }}>¿Sigues en la tienda?</h3>
         <p style={{ fontSize: 13, color: COLORS.textMuted, lineHeight: 1.55, margin: "0 0 18px" }}>
-          Solo queremos confirmar que sigues en{openVisitStore ? ` ${openVisitStore.name}` : " tu punto de venta"}. Gracias por tu trabajo hoy.
+          Solo queremos confirmar que sigues en{openVisitStore ? ` ${openVisitStore.name}` : " tu punto de venta"}. Al responder tomamos tu ubicación actual.
         </p>
         {presenceError && <p style={{ color: COLORS.danger, fontSize: 12.5, margin: "0 0 12px" }}>{presenceError}</p>}
-        <button
-          onClick={handleConfirmPresence}
-          disabled={presenceSending}
-          style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontFamily: "Inter", fontWeight: 700, fontSize: 14.5, cursor: presenceSending ? "default" : "pointer", opacity: presenceSending ? 0.7 : 1 }}
-        >
-          {presenceSending ? "Enviando…" : "Aceptar"}
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            onClick={() => handleConfirmPresence(false)}
+            disabled={presenceSending}
+            style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.text, fontFamily: "Inter", fontWeight: 700, fontSize: 14.5, cursor: presenceSending ? "default" : "pointer", opacity: presenceSending ? 0.7 : 1 }}
+          >
+            No, ya me fui
+          </button>
+          <button
+            onClick={() => handleConfirmPresence(true)}
+            disabled={presenceSending}
+            style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontFamily: "Inter", fontWeight: 700, fontSize: 14.5, cursor: presenceSending ? "default" : "pointer", opacity: presenceSending ? 0.7 : 1 }}
+          >
+            {presenceSending ? "Enviando…" : "Sí, sigo aquí"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1070,7 +1186,7 @@ export default function PromotoresApp() {
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
         {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
         {presenceModalNode}
-        {onboarding.open && <OnboardingTour steps={ONBOARDING_STEPS_PROMOTOR} onClose={onboarding.dismiss} />}
+        {onboarding.open && <OnboardingTour steps={onboardingStepsPromotor} onClose={onboarding.dismiss} />}
         <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           {showCheckoutReminder && (
             <button
