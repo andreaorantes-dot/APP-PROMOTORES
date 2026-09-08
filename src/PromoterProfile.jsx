@@ -63,7 +63,7 @@ function VisitRow({ v, promoterId, reportKey, reporting, onToggleReport, onSent 
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 700, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.storeName}</div>
           <div style={{ color: COLORS.textMuted, marginTop: 1 }}>
-            <MapPin size={10} style={{ verticalAlign: "-1px" }} /> Entró {fmtDateTime(v.checkInTime) || "--"} · Salió {fmtDateTime(v.checkOutTime) || "--"}
+            <MapPin size={10} style={{ verticalAlign: "-1px" }} /> Entró {fmtDateTime(v.checkInTime, hour12) || "--"} · Salió {fmtDateTime(v.checkOutTime, hour12) || "--"}
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
@@ -115,7 +115,9 @@ function VisitRow({ v, promoterId, reportKey, reporting, onToggleReport, onSent 
   );
 }
 
-export default function PromoterProfile({ promoterId, onClose }) {
+// `hour12` (default true): el tablero de admin pasa `false` para mostrar
+// "Entró/Salió" en formato 24h; supervisor no lo pasa y se queda en 12h.
+export default function PromoterProfile({ promoterId, onClose, hour12 = true }) {
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);

@@ -21,16 +21,19 @@ export function fmtMoneyCompact(n) {
   if (abs >= 1_000) return `$${(v / 1_000).toFixed(2)}K`;
   return fmtMoney(v);
 }
-export function fmtTime(iso) {
+// `hour12` (default true) controla 12h "8:30 p. m." vs 24h "20:30" — el
+// tablero de administrador lo pide en 24h; supervisor se queda con el
+// default (12h) al no pasarlo.
+export function fmtTime(iso, hour12 = true) {
   if (!iso) return "--:--";
-  try { return new Date(iso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }); } catch { return "--:--"; }
+  try { return new Date(iso).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit", hour12 }); } catch { return "--:--"; }
 }
 // Fecha + hora completas (para el CSV/Excel exportado: un solo día no la
 // necesita, pero en un rango de semana/mes/año es la única forma de saber
 // A QUÉ día pertenece cada visita).
-export function fmtDateTime(iso) {
+export function fmtDateTime(iso, hour12 = true) {
   if (!iso) return "";
-  try { return new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short" }); } catch { return ""; }
+  try { return new Date(iso).toLocaleString("es-MX", { dateStyle: "short", timeStyle: "short", hour12 }); } catch { return ""; }
 }
 // Fecha de hoy en la zona del navegador, para nombrar los archivos exportados.
 export function todayStamp() {
@@ -268,7 +271,9 @@ export function GoalBar({ goal }) {
 // Fila de un promotor en el listado. `onClick` (opcional) abre su perfil.
 // `onEditGoal` (opcional, SOLO lo pasa el tablero de admin/gerente) muestra un
 // botón para fijar/cambiar su meta semanal — el supervisor solo la ve.
-export function PromoterRow({ p, onClick, onEditGoal }) {
+// `hour12` (default true): el tablero de admin pasa `false` para mostrar
+// "entró/salió" en formato 24h; supervisor no lo pasa y se queda en 12h.
+export function PromoterRow({ p, onClick, onEditGoal, hour12 = true }) {
   const color = salesColor(p);
   const initials = (p.name || p.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
   return (
@@ -298,7 +303,7 @@ export function PromoterRow({ p, onClick, onEditGoal }) {
         <div style={{ fontSize: 11.5, color: COLORS.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {p.status === "missing"
             ? `${p.estado || "Sin estado"} · Sin visita hoy`
-            : `${p.estado || "Sin estado"} · ${p.status === "in" ? "En tienda" : "Cerró"} · entró ${fmtTime(p.checkInTime)} · salió ${fmtTime(p.checkOutTime)}`}
+            : `${p.estado || "Sin estado"} · ${p.status === "in" ? "En tienda" : "Cerró"} · entró ${fmtTime(p.checkInTime, hour12)} · salió ${fmtTime(p.checkOutTime, hour12)}`}
         </div>
         <div style={{ fontSize: 13, fontWeight: 800, color: COLORS.accentText, fontFamily: "JetBrains Mono", marginTop: 2 }}>{fmtMoney(p.money)}</div>
         <GoalBar goal={p.goal} />
@@ -369,7 +374,7 @@ export function EditGoalModal({ promoter, onSave, onClose, saving }) {
 // --- Exportación CSV / Excel -------------------------------------------------
 export const EXPORT_HEADERS = ["ID", "Promotor", "Supervisor", "Estado", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Dinero"];
 
-export function buildExportRows(promoters) {
+export function buildExportRows(promoters, hour12 = true) {
   return promoters.flatMap((p) =>
     (p.visits ?? []).map((v) => ({
       id: p.id,
@@ -381,8 +386,8 @@ export function buildExportRows(promoters) {
       estado: p.estado || "Sin estado",
       tienda: v.storeName,
       dia: v.day || "",
-      entrada: fmtDateTime(v.checkInTime),
-      salida: fmtDateTime(v.checkOutTime),
+      entrada: fmtDateTime(v.checkInTime, hour12),
+      salida: fmtDateTime(v.checkOutTime, hour12),
       rollos: v.rollos,
       cubetas: v.cubetas,
       dinero: v.money,

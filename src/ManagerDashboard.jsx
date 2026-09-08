@@ -243,7 +243,9 @@ export default function ManagerDashboard() {
   // Filas para exportar (CSV/Excel): una fila por VISITA, de los promotores
   // que quedaron después de aplicar los filtros de arriba — así se descarga
   // exactamente lo que se ve.
-  const exportRows = useMemo(() => buildExportRows(filtered), [filtered]);
+  // hour12=false: administrador ve horas en formato 24h (a diferencia de
+  // supervisor, que se queda en 12h por default).
+  const exportRows = useMemo(() => buildExportRows(filtered, false), [filtered]);
   const exportFilename = (ext) => `promotores-${range}-${todayStamp()}.${ext}`;
 
   // --- Layout del panel -----------------------------------------------------
@@ -521,7 +523,7 @@ export default function ManagerDashboard() {
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {filtered.map((p) => (
-                    <PromoterRow key={p.id} p={p} onClick={(pp) => setProfileId(pp.id)} onEditGoal={setEditingGoalFor} />
+                    <PromoterRow key={p.id} p={p} onClick={(pp) => setProfileId(pp.id)} onEditGoal={setEditingGoalFor} hour12={false} />
                   ))}
                 </div>
               )}
@@ -530,7 +532,7 @@ export default function ManagerDashboard() {
         </div>
       </div>
 
-      {profileId && <PromoterProfile promoterId={profileId} onClose={() => setProfileId(null)} />}
+      {profileId && <PromoterProfile promoterId={profileId} onClose={() => setProfileId(null)} hour12={false} />}
       {editingGoalFor && (
         <EditGoalModal
           promoter={editingGoalFor}
