@@ -6,18 +6,28 @@
 // una fila, cambia a el DETALLE de ese reporte (descripción + fotos). `fetcher`
 // es la función de api.js a usar (managerCompetencia | supervisorCompetencia)
 // para no duplicar este componente por rol.
+//
+// Las fotos (hasta 5 por reporte, Base64) NO vienen en el listado — se piden
+// aparte con `photosFetcher` (managerCompetenciaPhotos | supervisorCompetenciaPhotos)
+// SOLO del reporte que se abre, y se cachean en memoria mientras el panel
+// sigue abierto para no volver a pedirlas si el admin entra y sale del mismo
+// reporte. Antes se traían las fotos de los 200 reportes de golpe con el
+// listado — era el mayor consumo de memoria del backend.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Flag, User, ZoomIn, ChevronRight, ArrowLeft } from "lucide-react";
 import { ApiError } from "./lib/api.js";
 import { COLORS } from "./theme.js";
 import { fmtDateTime } from "./dashboardShared.jsx";
 
-export default function CompetenciaPanel({ fetcher }) {
+export default function CompetenciaPanel({ fetcher, photosFetcher }) {
   const [open, setOpen] = useState(false);
   const [reports, setReports] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState(null); // reporte elegido, o null = listado
+  const [photosById, setPhotosById] = useState({}); // cache: reportId -> [dataUrl, ...]
+  const [photosLoadingId, setPhotosLoadingId] = useState(null);
+  const [photosError, setPhotosError] = useState("");
   const [zoomSrc, setZoomSrc] = useState(null);
   const boxRef = useRef(null);
 
@@ -27,6 +37,17 @@ export default function CompetenciaPanel({ fetcher }) {
       .catch((e) => setError(e instanceof ApiError ? e.message : "No se pudieron cargar los reportes."))
       .finally(() => setLoaded(true));
   }, [fetcher]);
+
+  function selectReport(r) {
+    setSelected(r);
+    setPhotosError("");
+    if (photosById[r.id]) return; // ya en caché, no se vuelve a pedir
+    setPhotosLoadingId(r.id);
+    photosFetcher(r.id)
+      .then((res) => setPhotosById((prev) => ({ ...prev, [r.id]: res.photos ?? [] })))
+      .catch((e) => setPhotosError(e instanceof ApiError ? e.message : "No se pudieron cargar las fotos."))
+      .finally(() => setPhotosLoadingId(null));
+  }
 
   // Carga solo la primera vez que se abre (no en cada render) — igual de
   // económico que la campana, que sí hace polling porque cambia seguido; los
@@ -90,7 +111,7 @@ export default function CompetenciaPanel({ fetcher }) {
             {loaded && !error && !selected && reports.map((r) => (
               <button
                 key={r.id}
-                onClick={() => setSelected(r)}
+                onClick={() => selectReport(r)}
                 style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "none", border: "none", borderBottom: `1px solid ${COLORS.border}`, cursor: "pointer", textAlign: "left" }}
               >
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -101,7 +122,6 @@ export default function CompetenciaPanel({ fetcher }) {
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
                     <span style={{ fontSize: 10.5, fontWeight: 700, color: COLORS.accentText, background: COLORS.accentSoft, borderRadius: 999, padding: "1px 7px" }}>{r.marca}</span>
                     <span style={{ fontSize: 10.5, color: COLORS.textMuted }}>{fmtDateTime(r.createdAt)}</span>
-                    {r.photos?.length > 0 && <span style={{ fontSize: 10.5, color: COLORS.textMuted }}>· {r.photos.length} foto{r.photos.length === 1 ? "" : "s"}</span>}
                   </div>
                 </div>
                 <ChevronRight size={14} color={COLORS.textMuted} style={{ flexShrink: 0 }} />
@@ -119,9 +139,15 @@ export default function CompetenciaPanel({ fetcher }) {
                   <span style={{ fontSize: 10.5, color: COLORS.textMuted }}>{fmtDateTime(selected.createdAt)}</span>
                 </div>
                 <p style={{ fontSize: 12.5, color: COLORS.text, lineHeight: 1.5, margin: "0 0 10px" }}>{selected.descripcion}</p>
-                {selected.photos?.length > 0 && (
+                {photosLoadingId === selected.id && (
+                  <p style={{ fontSize: 12, color: COLORS.textMuted, margin: 0 }}>Cargando fotos…</p>
+                )}
+                {photosError && photosLoadingId !== selected.id && !photosById[selected.id] && (
+                  <p style={{ fontSize: 12, color: COLORS.danger, margin: 0 }}>{photosError}</p>
+                )}
+                {(photosById[selected.id]?.length ?? 0) > 0 && (
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {selected.photos.map((src, i) => (
+                    {photosById[selected.id].map((src, i) => (
                       <button
                         key={i}
                         onClick={() => setZoomSrc(src)}

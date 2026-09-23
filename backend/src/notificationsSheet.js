@@ -17,13 +17,22 @@
 import { existsSync, readFileSync } from "node:fs";
 import { google } from "googleapis";
 import { config } from "./config.js";
+import { dayKeyOf, todayKey } from "./businessDay.js";
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets"];
 
 const HEADERS = ["fecha", "tipo", "para", "id_promotor", "promotor", "id_tienda", "tienda", "periodo", "detalle"];
 
+// La campana hace polling cada 30s (ver NotificationBell.jsx) — sin caché,
+// eso era una lectura completa del Sheet (hasta 5000 filas) por cada admin/
+// supervisor con la app abierta, cada 30 segundos, sin parar. 60s de caché
+// no se nota (las notificaciones no son tan urgentes) y corta ese tráfico
+// a la mitad o menos.
+const TTL_MS = Number(process.env.NOTIFICATIONS_CACHE_TTL_MS ?? 60 * 1000);
+
 let clientPromise = null;
 let tabEnsured = false;
+let rowsCache = { at: 0, rows: [] };
 
 function isConfigured() {
   return Boolean((config.sheets.json || config.sheets.keyFile) && config.sheets.spreadsheetId);
@@ -73,6 +82,7 @@ async function ensureTab(sheets) {
 }
 
 async function readAllRows() {
+  if (Date.now() - rowsCache.at < TTL_MS) return rowsCache.rows;
   if (!isConfigured()) return [];
   const sheets = await getClient();
   await ensureTab(sheets);
@@ -81,7 +91,7 @@ async function readAllRows() {
     range: `${config.sheets.notificacionesTab}!A1:I5000`,
   });
   const rows = res.data.values ?? [];
-  return rows.slice(1).map((r) => ({
+  const parsed = rows.slice(1).map((r) => ({
     fecha: r[0] || "",
     tipo: r[1] || "",
     para: r[2] || "",
@@ -92,6 +102,8 @@ async function readAllRows() {
     periodo: r[7] || "",
     detalle: r[8] || "",
   }));
+  rowsCache = { at: Date.now(), rows: parsed };
+  return parsed;
 }
 
 // Agrega una notificación. Best-effort: nunca lanza (registra y sigue).
@@ -108,6 +120,7 @@ export async function appendNotification({ tipo, para, idPromotor = "", promotor
       insertDataOption: "INSERT_ROWS",
       requestBody: { values: [row] },
     });
+    rowsCache = { at: 0, rows: [] }; // invalida el caché: que la próxima lectura sí vea esta fila
     return { appended: true };
   } catch (e) {
     console.error("[notificationsSheet] No se pudo agregar la notificación:", e.message);
@@ -137,6 +150,44 @@ export async function listNotificationsFor(para, limit = 50) {
     .filter((r) => r.para === para)
     .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
     .slice(0, limit);
+}
+
+// Notificaciones de HOY (hora de negocio) para la campana — reemplaza el
+// tope fijo de 50 históricas: el día de hoy, completo, sin importar cuántas
+// sean. El historial de días anteriores vive en listNotificationsPage.
+export async function listNotificationsForToday(para) {
+  const rows = await readAllRows();
+  const today = todayKey();
+  return rows
+    .filter((r) => r.para === para && r.fecha && dayKeyOf(new Date(r.fecha)) === today)
+    .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+}
+
+// Historial de notificaciones PAGINADO POR DÍA (no por fila) — misma idea que
+// el historial de check-in/check-out del promotor: cada página trae
+// `daysPerPage` días distintos (con TODAS sus notificaciones), más recientes
+// primero. `hasMore` indica si hay días más viejos que la página actual.
+export async function listNotificationsPage(para, { page = 1, daysPerPage = 7 } = {}) {
+  const rows = await readAllRows();
+  const mine = rows.filter((r) => r.para === para && r.fecha);
+
+  const byDay = new Map();
+  for (const r of mine) {
+    const d = dayKeyOf(new Date(r.fecha));
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push(r);
+  }
+  const allDays = [...byDay.keys()].sort((a, b) => (a < b ? 1 : -1)); // desc
+
+  const start = Math.max(0, (page - 1) * daysPerPage);
+  const pageDays = allDays.slice(start, start + daysPerPage);
+  const hasMore = allDays.length > start + daysPerPage;
+
+  const days = pageDays.map((d) => ({
+    day: d,
+    notifications: byDay.get(d).sort((a, b) => (a.fecha < b.fecha ? 1 : -1)),
+  }));
+  return { days, page, daysPerPage, hasMore };
 }
 
 // La notificación más reciente de un tipo/destinatario dado, o null. La usa

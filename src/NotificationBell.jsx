@@ -4,39 +4,27 @@
 // Pide GET /api/notifications al montar y cada 30s (centro de notificaciones
 // "en la app": no hay push real al teléfono, ver decisión en el chat). Muestra
 // un punto rojo cuando hay algo nuevo desde la última vez que se abrió.
+//
+// Solo trae las notificaciones de HOY (antes traía hasta 50 sin importar el
+// día — con el polling cada 30s eso era releer y re-resolver fotos de
+// notificaciones de hace semanas, todo el tiempo). "Ver historial completo"
+// abre NotificationsHistory, con los días anteriores paginados aparte.
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Bell, TrendingUp, LogIn, Trophy, Store as StoreIcon, Mail, KeyRound } from "lucide-react";
+import { Bell, TrendingUp, History } from "lucide-react";
 import { api } from "./lib/api.js";
 import { COLORS } from "./theme.js";
 import { fmtMoney, fmtNum } from "./dashboardShared.jsx";
+import { iconFor, timeAgo } from "./lib/notificationsFormat.js";
+import NotificationsHistory from "./NotificationsHistory.jsx";
 
 const POLL_MS = 30000;
-
-function iconFor(tipo) {
-  if (tipo === "checkin") return LogIn;
-  if (tipo === "promoter_goal") return Trophy;
-  if (tipo === "store_goal") return StoreIcon;
-  if (tipo === "weekly_report") return Mail;
-  if (tipo === "password_recovery") return KeyRound;
-  return Bell;
-}
-
-function timeAgo(iso) {
-  if (!iso) return "";
-  const ms = Date.now() - new Date(iso).getTime();
-  const min = Math.round(ms / 60000);
-  if (min < 1) return "ahora";
-  if (min < 60) return `hace ${min} min`;
-  const h = Math.round(min / 60);
-  if (h < 24) return `hace ${h} h`;
-  return new Date(iso).toLocaleDateString("es-MX", { day: "2-digit", month: "short" });
-}
 
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState({ notifications: [], insight: null });
   const [seenAt, setSeenAt] = useState(() => Date.now());
   const [zoomSrc, setZoomSrc] = useState(null);
+  const [showHistory, setShowHistory] = useState(false);
   const boxRef = useRef(null);
 
   const load = useCallback(async () => {
@@ -137,6 +125,13 @@ export default function NotificationBell() {
               );
             })
           )}
+
+          <button
+            onClick={() => { setShowHistory(true); setOpen(false); }}
+            style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "10px 14px", background: "none", border: "none", borderTop: `1px solid ${COLORS.border}`, color: COLORS.accentText, fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+          >
+            <History size={13} /> Ver historial completo
+          </button>
         </div>
       )}
 
@@ -148,6 +143,8 @@ export default function NotificationBell() {
           <img src={zoomSrc} alt="" style={{ maxWidth: "100%", maxHeight: "100%", borderRadius: 8 }} />
         </div>
       )}
+
+      {showHistory && <NotificationsHistory onClose={() => setShowHistory(false)} />}
     </div>
   );
 }

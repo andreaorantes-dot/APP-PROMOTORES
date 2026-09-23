@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound, Heart, HardDrive, Download } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound, Heart, HardDrive, Download, ChevronRight, ChevronLeft } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
 import { usePwaInstall } from "./lib/pwaInstall.js";
-import { fmtDateTime } from "./dashboardShared.jsx";
 import TrainingSection from "./TrainingSection.jsx";
 import {
   enqueueAction,
@@ -48,6 +47,17 @@ function fmtDuration(startIso, endIso) {
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   return h > 0 ? `${h}h ${m}min` : `${m}min`;
+}
+
+// Encabezado de día legible ("Lunes 22 de septiembre") para el historial
+// agrupado por día — mismo criterio que el historial que ve el admin/
+// supervisor en PromoterProfile.jsx.
+function fmtDayHeader(day) {
+  const [y, m, d] = String(day).split("-").map(Number);
+  if (!y || !m || !d) return day || "Sin fecha";
+  const date = new Date(y, m - 1, d);
+  const label = date.toLocaleDateString("es-MX", { weekday: "long", day: "numeric", month: "long" });
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function fmtDistance(m) {
@@ -468,7 +478,16 @@ export default function PromotoresApp() {
   const [screen, setScreen] = useState("dashboard");
   const [records, setRecords] = useState({});
   const [myGoal, setMyGoal] = useState(null); // { target, achieved, reached } | null
-  const [myHistory, setMyHistory] = useState(null); // perfil completo (historial, tiendas frecuentes) | null
+  const [myHistory, setMyHistory] = useState(null); // perfil completo (tiendas frecuentes, foto) | null
+
+  // Mi historial de check-in/check-out (pantalla aparte, ver screen ===
+  // "historial") — paginado POR DÍA, 7 días por default. Antes vivía dentro
+  // de "Perfil" sin paginar; con meses de uso eso era cada vez más datos.
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyDaysPerPage, setHistoryDaysPerPage] = useState(7);
+  const [historyData, setHistoryData] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const [selectedStore, setSelectedStore] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -715,8 +734,8 @@ export default function PromotoresApp() {
     return () => { active = false; };
   }, [status, records]);
 
-  // Historial propio (check-in/check-out, tiendas frecuentes) — solo se pide
-  // al entrar a "Perfil", no en cada carga del dashboard.
+  // Tiendas frecuentes + foto — solo se pide al entrar a "Perfil", no en cada
+  // carga del dashboard.
   useEffect(() => {
     if (status !== "authed" || screen !== "perfil" || !user) return;
     let active = true;
@@ -726,6 +745,30 @@ export default function PromotoresApp() {
       .catch(() => {});
     return () => { active = false; };
   }, [status, screen, user]);
+
+  // Mi historial paginado — solo se pide al entrar a "historial", y de nuevo
+  // si cambia la página o los días por página.
+  useEffect(() => {
+    if (status !== "authed" || screen !== "historial" || !user) return;
+    let active = true;
+    setHistoryLoading(true);
+    setHistoryError("");
+    api
+      .promoterHistory(user.id, { page: historyPage, daysPerPage: historyDaysPerPage })
+      .then((res) => { if (active) setHistoryData(res); })
+      .catch((e) => { if (active) setHistoryError(e instanceof ApiError ? e.message : "No se pudo cargar tu historial."); })
+      .finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; };
+  }, [status, screen, user, historyPage, historyDaysPerPage]);
+
+  function openHistorial() {
+    setHistoryPage(1);
+    setScreen("historial");
+  }
+  function changeHistoryDaysPerPage(n) {
+    setHistoryDaysPerPage(n);
+    setHistoryPage(1);
+  }
 
   // Obtiene la ubicación GPS real y pide al backend las tiendas cercanas
   // (Haversine, radio ~2 km). No hay asignación fija por promotor.
@@ -1606,30 +1649,14 @@ export default function PromotoresApp() {
             </div>
           )}
 
-          <div style={{ marginTop: 18 }}>
-            <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>MI HISTORIAL</span>
-            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-              {!myHistory ? (
-                <p style={{ color: COLORS.textMuted, fontSize: 13 }}>Cargando…</p>
-              ) : myHistory.history.length === 0 ? (
-                <p style={{ color: COLORS.textMuted, fontSize: 13 }}>Aún no tienes visitas registradas.</p>
-              ) : (
-                myHistory.history.map((v, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "10px 12px" }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.storeName}</div>
-                      <div style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 2 }}>
-                        Entró {fmtDateTime(v.checkInTime) || "--"} · Salió {fmtDateTime(v.checkOutTime) || "--"}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right", flexShrink: 0, color: COLORS.accentText, fontFamily: "JetBrains Mono", fontWeight: 800, fontSize: 13 }}>
-                      {v.rollos}R · {v.cubetas}C
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          <button
+            onClick={openHistorial}
+            style={{ width: "100%", marginTop: 18, display: "flex", alignItems: "center", gap: 8, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}
+          >
+            <Clock size={15} color={COLORS.accentText} />
+            <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: COLORS.text }}>Mi historial de check-in / check-out</span>
+            <ChevronRight size={15} color={COLORS.textMuted} />
+          </button>
 
           <button
             onClick={handleLogout}
@@ -1639,6 +1666,91 @@ export default function PromotoresApp() {
           </button>
         </div>
         <FooterNav current="perfil" onNavigate={goTab} />
+      </div>
+    );
+  }
+
+  if (screen === "historial") {
+    return (
+      <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
+        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {presenceModalNode}
+        <div style={{ padding: "18px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
+          <button onClick={() => setScreen("perfil")} style={{ background: "none", border: "none", color: COLORS.textMuted, display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+            <ArrowLeft size={15} /> Perfil
+          </button>
+
+          <h2 style={{ fontFamily: "Space Grotesk", fontSize: 20, fontWeight: 600, color: COLORS.text, margin: "0 0 16px" }}>Mi historial</h2>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 14 }}>
+            <span style={{ fontSize: 11, letterSpacing: "0.08em", color: COLORS.textMuted, fontWeight: 600 }}>DÍAS POR PÁGINA</span>
+            <select
+              value={historyDaysPerPage}
+              onChange={(e) => changeHistoryDaysPerPage(Number(e.target.value))}
+              style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "6px 9px", color: COLORS.text, fontSize: 12.5, fontWeight: 600 }}
+            >
+              {[7, 14, 30].map((n) => (
+                <option key={n} value={n}>{n} días</option>
+              ))}
+            </select>
+          </div>
+
+          {historyLoading && <p style={{ color: COLORS.textMuted, fontSize: 13 }}>Cargando…</p>}
+          {historyError && <p style={{ color: COLORS.danger, fontSize: 13 }}>{historyError}</p>}
+
+          {!historyLoading && !historyError && historyData && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {historyData.days.length === 0 ? (
+                <p style={{ color: COLORS.textMuted, fontSize: 13 }}>
+                  {historyPage === 1 ? "Aún no tienes visitas registradas." : "No hay más historial."}
+                </p>
+              ) : (
+                historyData.days.map(({ day, visits }) => (
+                  <div key={day}>
+                    <span style={{ fontSize: 11, letterSpacing: "0.08em", color: COLORS.textMuted, fontWeight: 600 }}>{fmtDayHeader(day).toUpperCase()}</span>
+                    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                      {visits.map((v, i) => (
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "10px 12px" }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 13.5, fontWeight: 700, color: COLORS.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.storeName}</div>
+                            <div style={{ fontSize: 11.5, color: COLORS.textMuted, marginTop: 2 }}>
+                              Entró {fmtTime(v.checkInTime)} · Salió {v.checkOutTime ? fmtTime(v.checkOutTime) : "--:--"}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: "right", flexShrink: 0, color: COLORS.accentText, fontFamily: "JetBrains Mono", fontWeight: 800, fontSize: 13 }}>
+                            {v.rollos}R · {v.cubetas}C
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {(historyPage > 1 || historyData.hasMore) && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 10, borderTop: `1px solid ${COLORS.border}` }}>
+                  <button
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                    disabled={historyPage === 1}
+                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: "transparent", color: historyPage === 1 ? COLORS.textMuted : COLORS.text, fontSize: 12.5, fontWeight: 600, cursor: historyPage === 1 ? "default" : "pointer", opacity: historyPage === 1 ? 0.5 : 1 }}
+                  >
+                    <ChevronLeft size={14} /> Anterior
+                  </button>
+                  <span style={{ fontSize: 12, color: COLORS.textMuted }}>Página {historyPage}</span>
+                  <button
+                    onClick={() => setHistoryPage((p) => p + 1)}
+                    disabled={!historyData.hasMore}
+                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "8px 12px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: "transparent", color: !historyData.hasMore ? COLORS.textMuted : COLORS.text, fontSize: 12.5, fontWeight: 600, cursor: !historyData.hasMore ? "default" : "pointer", opacity: !historyData.hasMore ? 0.5 : 1 }}
+                  >
+                    Siguiente <ChevronRight size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     );
   }

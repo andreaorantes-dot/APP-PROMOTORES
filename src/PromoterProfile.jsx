@@ -10,10 +10,12 @@
 // reporte se guarda con el MISMO formato que la retroalimentación de los
 // promotores (ver report-behavior en routes/promoterProfile.js).
 import { useState, useEffect } from "react";
-import { X, User, MapPin, Store, Clock, ChevronRight, ArrowLeft, AlertTriangle, Send, Camera, ZoomIn } from "lucide-react";
+import { X, User, MapPin, Store, Clock, ChevronRight, ChevronLeft, ArrowLeft, AlertTriangle, Send, Camera, ZoomIn } from "lucide-react";
 import { api, ApiError } from "./lib/api.js";
 import { COLORS } from "./theme.js";
 import { fmtNum, fmtDateTime } from "./dashboardShared.jsx";
+
+const DAYS_PER_PAGE_OPTIONS = [7, 14, 30];
 
 function fmtDayHeader(day) {
   const [y, m, d] = String(day).split("-").map(Number);
@@ -23,19 +25,9 @@ function fmtDayHeader(day) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-function groupByDay(history) {
-  const map = new Map();
-  for (const v of history) {
-    const key = v.day || "Sin fecha";
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(v);
-  }
-  return [...map.entries()];
-}
-
 // Fila de una visita dentro del historial, con el botón de reportar
 // comportamiento extraño (se expande hacia un mini-formulario inline).
-function VisitRow({ v, promoterId, reportKey, reporting, onToggleReport, onSent }) {
+function VisitRow({ v, promoterId, reportKey, reporting, onToggleReport, onSent, hour12 }) {
   const isOpen = reporting.openKey === reportKey;
   const sent = reporting.sentKeys.has(reportKey);
   const [text, setText] = useState("");
@@ -126,6 +118,15 @@ export default function PromoterProfile({ promoterId, onClose, hour12 = true }) 
   const [sentKeys, setSentKeys] = useState(new Set());
   const [zoomSrc, setZoomSrc] = useState(null);
 
+  // Historial: paginado POR DÍA (ver getPromoterHistoryPage), 7 días por
+  // página por default. Se pide aparte del perfil (que ya no lo trae) y solo
+  // cuando se entra a la pantalla de historial, no al abrir el perfil.
+  const [historyPage, setHistoryPage] = useState(1);
+  const [daysPerPage, setDaysPerPage] = useState(7);
+  const [historyData, setHistoryData] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -138,6 +139,28 @@ export default function PromoterProfile({ promoterId, onClose, hour12 = true }) 
     return () => { cancelled = true; };
   }, [promoterId]);
 
+  useEffect(() => {
+    if (screen !== "history") return;
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryError("");
+    api
+      .promoterHistory(promoterId, { page: historyPage, daysPerPage })
+      .then((res) => { if (!cancelled) setHistoryData(res); })
+      .catch((e) => { if (!cancelled) setHistoryError(e instanceof ApiError ? e.message : "No se pudo cargar el historial."); })
+      .finally(() => { if (!cancelled) setHistoryLoading(false); });
+    return () => { cancelled = true; };
+  }, [screen, promoterId, historyPage, daysPerPage]);
+
+  function openHistory() {
+    setHistoryPage(1);
+    setScreen("history");
+  }
+  function changeDaysPerPage(n) {
+    setDaysPerPage(n);
+    setHistoryPage(1);
+  }
+
   function toggleReport(key) {
     setOpenReportKey((cur) => (cur === key ? null : key));
   }
@@ -145,9 +168,6 @@ export default function PromoterProfile({ promoterId, onClose, hour12 = true }) 
     setSentKeys((prev) => new Set(prev).add(key));
     setOpenReportKey(null);
   }
-
-  const history = profile?.history ?? [];
-  const grouped = groupByDay(history);
 
   return (
     <div
@@ -227,47 +247,87 @@ export default function PromoterProfile({ promoterId, onClose, hour12 = true }) 
               </div>
 
               <button
-                onClick={() => setScreen("history")}
+                onClick={openHistory}
                 style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}
               >
                 <Clock size={15} color={COLORS.accentText} />
                 <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: COLORS.text }}>Historial de check-in / check-out</span>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: COLORS.accentText, background: COLORS.accentSoft, borderRadius: 999, padding: "2px 8px" }}>{history.length}</span>
                 <ChevronRight size={15} color={COLORS.textMuted} />
               </button>
             </>
           )}
 
           {profile && screen === "history" && (
-            history.length === 0 ? (
-              <p style={{ fontSize: 12.5, color: COLORS.textMuted }}>Sin visitas registradas.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {grouped.map(([day, visits]) => (
-                  <div key={day}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-                      {fmtDayHeader(day)}
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {visits.map((v, i) => {
-                        const key = `${day}-${v.storeId}-${i}`;
-                        return (
-                          <VisitRow
-                            key={key}
-                            v={v}
-                            promoterId={promoterId}
-                            reportKey={key}
-                            reporting={{ openKey: openReportKey, sentKeys }}
-                            onToggleReport={toggleReport}
-                            onSent={markSent}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Días por página</span>
+                <select
+                  value={daysPerPage}
+                  onChange={(e) => changeDaysPerPage(Number(e.target.value))}
+                  style={{ background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "5px 8px", color: COLORS.text, fontSize: 12, fontWeight: 600 }}
+                >
+                  {DAYS_PER_PAGE_OPTIONS.map((n) => (
+                    <option key={n} value={n}>{n} días</option>
+                  ))}
+                </select>
               </div>
-            )
+
+              {historyLoading && <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: 0 }}>Cargando…</p>}
+              {historyError && <p style={{ fontSize: 12.5, color: COLORS.danger, margin: 0 }}>{historyError}</p>}
+
+              {!historyLoading && !historyError && historyData && (
+                historyData.days.length === 0 ? (
+                  <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: 0 }}>
+                    {historyPage === 1 ? "Sin visitas registradas." : "No hay más historial."}
+                  </p>
+                ) : (
+                  historyData.days.map(({ day, visits }) => (
+                    <div key={day}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                        {fmtDayHeader(day)}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {visits.map((v, i) => {
+                          const key = `${day}-${v.storeId}-${i}`;
+                          return (
+                            <VisitRow
+                              key={key}
+                              v={v}
+                              promoterId={promoterId}
+                              reportKey={key}
+                              reporting={{ openKey: openReportKey, sentKeys }}
+                              onToggleReport={toggleReport}
+                              onSent={markSent}
+                              hour12={hour12}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))
+                )
+              )}
+
+              {!historyLoading && historyData && (historyPage > 1 || historyData.hasMore) && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 8, borderTop: `1px solid ${COLORS.border}` }}>
+                  <button
+                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                    disabled={historyPage === 1}
+                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "7px 10px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: "transparent", color: historyPage === 1 ? COLORS.textMuted : COLORS.text, fontSize: 12, fontWeight: 600, cursor: historyPage === 1 ? "default" : "pointer", opacity: historyPage === 1 ? 0.5 : 1 }}
+                  >
+                    <ChevronLeft size={14} /> Anterior
+                  </button>
+                  <span style={{ fontSize: 11.5, color: COLORS.textMuted }}>Página {historyPage}</span>
+                  <button
+                    onClick={() => setHistoryPage((p) => p + 1)}
+                    disabled={!historyData.hasMore}
+                    style={{ display: "flex", alignItems: "center", gap: 4, padding: "7px 10px", borderRadius: 8, border: `1px solid ${COLORS.border}`, background: "transparent", color: !historyData.hasMore ? COLORS.textMuted : COLORS.text, fontSize: 12, fontWeight: 600, cursor: !historyData.hasMore ? "default" : "pointer", opacity: !historyData.hasMore ? 0.5 : 1 }}
+                  >
+                    Siguiente <ChevronRight size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

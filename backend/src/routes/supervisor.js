@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 import { Router } from "express";
 import { requireAuth, requireRole } from "../auth.js";
-import { getSupervisorSummary, getCompetitionReports } from "../db.js";
+import { getSupervisorSummary, getCompetitionReports, getCompetitionReportPhotos } from "../db.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("supervisor"));
@@ -24,7 +24,9 @@ router.get("/summary", async (req, res) => {
   }
 });
 
-// GET /api/supervisor/competencia — reportes de Competencia, acotados a SU equipo.
+// GET /api/supervisor/competencia — reportes de Competencia, acotados a SU
+// equipo. Las fotos NO vienen aquí (ver /competencia/:id/photos) — es solo
+// el listado.
 router.get("/competencia", async (req, res) => {
   try {
     const reports = await getCompetitionReports({ supervisorId: req.promoter.id });
@@ -32,6 +34,20 @@ router.get("/competencia", async (req, res) => {
   } catch (err) {
     console.error("[supervisor/competencia]", err);
     return res.status(500).json({ message: "No se pudieron cargar los reportes de competencia" });
+  }
+});
+
+// GET /api/supervisor/competencia/:id/photos — fotos de UN reporte, pedidas
+// al abrir su detalle. `supervisorId` revalida que sea de SU equipo (null si
+// no, aunque conozca el id de un reporte ajeno).
+router.get("/competencia/:id/photos", async (req, res) => {
+  try {
+    const photos = await getCompetitionReportPhotos(req.params.id, { supervisorId: req.promoter.id });
+    if (photos === null) return res.status(404).json({ message: "Reporte no encontrado" });
+    return res.json({ photos });
+  } catch (err) {
+    console.error("[supervisor/competencia/photos]", err);
+    return res.status(500).json({ message: "No se pudieron cargar las fotos" });
   }
 });
 

@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 import { Router } from "express";
 import { requireAuth, requireRole } from "../auth.js";
-import { getPromoterProfile, promoterBelongsToSupervisor, findPromoterById } from "../db.js";
+import { getPromoterProfile, getPromoterHistoryPage, promoterBelongsToSupervisor, findPromoterById } from "../db.js";
 import { appendFeedbackRow } from "../sheets.js";
 
 const router = Router();
@@ -29,6 +29,29 @@ router.get("/:id/profile", async (req, res) => {
   } catch (err) {
     console.error("[promoters/:id/profile]", err);
     return res.status(500).json({ message: "No se pudo cargar el perfil" });
+  }
+});
+
+// GET /api/promoters/:id/history?page=1&daysPerPage=7 — historial de
+// check-in/check-out paginado POR DÍA (ver getPromoterHistoryPage). Mismo
+// control de acceso que /profile de arriba.
+router.get("/:id/history", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.promoter;
+    if (role === "promotor" && id !== req.promoter.id) {
+      return res.status(403).json({ message: "Solo puedes ver tu propio historial" });
+    }
+    if (role === "supervisor" && !(await promoterBelongsToSupervisor(id, req.promoter.id))) {
+      return res.status(403).json({ message: "Ese promotor no está a tu cargo" });
+    }
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const daysPerPage = Math.min(30, Math.max(1, Number(req.query.daysPerPage) || 7));
+    const result = await getPromoterHistoryPage(id, { page, daysPerPage });
+    return res.json(result);
+  } catch (err) {
+    console.error("[promoters/:id/history]", err);
+    return res.status(500).json({ message: "No se pudo cargar el historial" });
   }
 });
 

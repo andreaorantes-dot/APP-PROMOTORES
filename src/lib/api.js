@@ -176,9 +176,11 @@ export const api = {
       body: { meta, nombre },
     }),
 
-  // Reportes de Competencia (marca, descripción, fotos) que enviaron los
-  // promotores — panel de revisión del gerente/admin.
+  // Reportes de Competencia (marca, descripción) que enviaron los promotores
+  // — panel de revisión del gerente/admin. Las fotos NO vienen en el listado
+  // (ver managerCompetenciaPhotos) — se piden aparte, al abrir un reporte.
   managerCompetencia: (signal) => request("/manager/competencia", { signal }),
+  managerCompetenciaPhotos: (reportId, signal) => request(`/manager/competencia/${encodeURIComponent(reportId)}/photos`, { signal }),
 
   // --- Supervisor -----------------------------------------------------------
   // Mismo resumen que el del gerente, pero acotado a SUS promotores (lo filtra
@@ -186,17 +188,29 @@ export const api = {
   supervisorSummary: (range, signal, { from, to } = {}) =>
     request(`/supervisor/summary${rangeQuery(range, from, to)}`, { signal }),
 
-  // Mismos reportes de Competencia, acotados a SU equipo.
+  // Mismos reportes de Competencia, acotados a SU equipo (fotos aparte, igual que arriba).
   supervisorCompetencia: (signal) => request("/supervisor/competencia", { signal }),
+  supervisorCompetenciaPhotos: (reportId, signal) => request(`/supervisor/competencia/${encodeURIComponent(reportId)}/photos`, { signal }),
 
   // --- Notificaciones (campana) ---------------------------------------------
   // Admin/gerente reciben las de "admin" + un insight de Top 5 en vivo;
   // supervisor recibe las suyas (check-in de sus promotores, metas alcanzadas).
+  // Solo las de HOY — el historial completo es notificationsHistory, aparte.
   notifications: (signal) => request("/notifications", { signal }),
+
+  // Historial de notificaciones paginado POR DÍA (7 días por página por
+  // default) — pantalla aparte, para cuando se quiere ver más que hoy.
+  notificationsHistory: ({ page = 1, daysPerPage = 7 } = {}, signal) =>
+    request(`/notifications/history?page=${page}&daysPerPage=${daysPerPage}`, { signal }),
 
   // --- Perfil de promotor (historial) ---------------------------------------
   promoterProfile: (promoterId, signal) =>
     request(`/promoters/${encodeURIComponent(promoterId)}/profile`, { signal }),
+
+  // Historial de check-in/check-out paginado POR DÍA (no por fila) — cada
+  // página trae `daysPerPage` días distintos, más recientes primero.
+  promoterHistory: (promoterId, { page = 1, daysPerPage = 7 } = {}, signal) =>
+    request(`/promoters/${encodeURIComponent(promoterId)}/history?page=${page}&daysPerPage=${daysPerPage}`, { signal }),
 
   // Reporta un comportamiento extraño sobre una visita puntual del historial
   // (admin/gerente/supervisor). Se guarda igual que la retroalimentación.

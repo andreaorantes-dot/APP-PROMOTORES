@@ -5,7 +5,7 @@
 // Un promotor de campo que intente llamarlas recibe 403.
 import { Router } from "express";
 import { requireAuth, requireRole } from "../auth.js";
-import { getManagerSummary, setPromoterGoal, getCompetitionReports } from "../db.js";
+import { getManagerSummary, setPromoterGoal, getCompetitionReports, getCompetitionReportPhotos } from "../db.js";
 
 const router = Router();
 router.use(requireAuth, requireRole("gerente", "admin"));
@@ -48,7 +48,8 @@ router.put("/promoter/:id/goal", async (req, res) => {
 });
 
 // GET /api/manager/competencia — reportes de Competencia de TODOS los
-// promotores (marca, descripción, fotos), más recientes primero.
+// promotores (marca, descripción), más recientes primero. Las fotos NO
+// vienen aquí (ver /competencia/:id/photos) — es solo el listado.
 router.get("/competencia", async (req, res) => {
   try {
     const reports = await getCompetitionReports();
@@ -56,6 +57,19 @@ router.get("/competencia", async (req, res) => {
   } catch (err) {
     console.error("[manager/competencia]", err);
     return res.status(500).json({ message: "No se pudieron cargar los reportes de competencia" });
+  }
+});
+
+// GET /api/manager/competencia/:id/photos — fotos de UN reporte, pedidas al
+// abrir su detalle (no en el listado, ver comentario arriba).
+router.get("/competencia/:id/photos", async (req, res) => {
+  try {
+    const photos = await getCompetitionReportPhotos(req.params.id);
+    if (photos === null) return res.status(404).json({ message: "Reporte no encontrado" });
+    return res.json({ photos });
+  } catch (err) {
+    console.error("[manager/competencia/photos]", err);
+    return res.status(500).json({ message: "No se pudieron cargar las fotos" });
   }
 });
 

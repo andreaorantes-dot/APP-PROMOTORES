@@ -301,7 +301,7 @@ export default function ManagerDashboard() {
             <HelpCircle size={16} />
           </button>
           <NotificationBell />
-          <CompetenciaPanel fetcher={api.managerCompetencia} />
+          <CompetenciaPanel fetcher={api.managerCompetencia} photosFetcher={api.managerCompetenciaPhotos} />
           <FeedbackAlertsPanel />
           <button
             onClick={() => load()}

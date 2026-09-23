@@ -159,14 +159,19 @@ export async function createCompetitionReport(promoterId, { marca, descripcion, 
 }
 
 // Reportes de Competencia para el panel del gerente/admin (o de un supervisor,
-// acotado a SU equipo). Más recientes primero. Las fotos se guardan como JSON
-// en la base de datos (ver CompetitionReport.photos) — se devuelven ya
-// parseadas como arreglo.
+// acotado a SU equipo). Más recientes primero. Las fotos (hasta 5 por
+// reporte, Base64) NO se traen aquí a propósito: es solo el LISTADO (fila
+// compacta por reporte), y con hasta `limit` reportes de golpe, traer las
+// fotos de los 200 para mostrar un renglón de texto era el mayor consumo de
+// memoria del backend — se cargaban decenas de MB para un panel que el admin
+// ni siquiera había abierto. El detalle (con fotos) se pide aparte, uno por
+// uno, con getCompetitionReportPhotos — ver rutas /competencia/:id/photos.
 export async function getCompetitionReports({ supervisorId, limit = 200 } = {}) {
   const reports = await prisma.competitionReport.findMany({
     include: { promoter: true },
     orderBy: { createdAt: "desc" },
     take: limit,
+    omit: { photos: true },
   });
   const filtered = supervisorId
     ? reports.filter((r) => (r.promoter?.supervisor || "").trim().toLowerCase() === supervisorId)
@@ -178,9 +183,23 @@ export async function getCompetitionReports({ supervisorId, limit = 200 } = {}) 
     supervisor: r.promoter?.supervisor || null,
     marca: r.marca,
     descripcion: r.descripcion,
-    photos: r.photos ? JSON.parse(r.photos) : [],
     createdAt: r.createdAt,
   }));
+}
+
+// Fotos de UN reporte de Competencia (para el detalle, pedido bajo demanda al
+// hacer clic en una fila del listado de arriba). `supervisorId` (opcional)
+// revalida que el reporte sea de SU equipo — mismo criterio de acceso que
+// getCompetitionReports, para no dejar ver el detalle de un reporte ajeno
+// aunque se conozca el id. Devuelve null si no existe o no le pertenece.
+export async function getCompetitionReportPhotos(reportId, { supervisorId } = {}) {
+  const report = await prisma.competitionReport.findUnique({
+    where: { id: reportId },
+    include: { promoter: true },
+  });
+  if (!report) return null;
+  if (supervisorId && (report.promoter?.supervisor || "").trim().toLowerCase() !== supervisorId) return null;
+  return report.photos ? JSON.parse(report.photos) : [];
 }
 
 // --- Resumen para el GERENTE -------------------------------------------------
@@ -212,6 +231,11 @@ export async function getManagerSummary(rangeKey = "today", { supervisorId, from
       : await prisma.visitRecord.findMany({
           where: { day: { gte: range.from, lte: range.to } },
           include: { promoter: true, store: true },
+          // summarizeVisitRows nunca lee `photo` (foto de check-in, Base64):
+          // omitirla aquí es la diferencia entre traer unos KB por fila y traer
+          // cientos de KB por fila — en un rango de mes/año, con decenas de
+          // promotores, eso es la causa más probable de quedarse sin memoria.
+          omit: { photo: true },
         });
 
   // Con AUTH_SOURCE=sheet, `promoter` viene del mirror local en Postgres, que
@@ -463,35 +487,42 @@ export async function checkAndNotifyGoals(promoterId, storeId) {
   }
 }
 
-// --- Perfil del promotor (historial de check-in/check-out) ------------------
-// Últimos `limit` registros de visita (con tienda incluida) + las tiendas a
-// las que va con más frecuencia. Se usa desde el tablero del gerente/admin y
-// del supervisor (que solo puede ver a SUS promotores; esa validación vive en
-// la ruta, no aquí).
-export async function getPromoterProfile(promoterId, limit = 200) {
+// --- Perfil del promotor (resumen) -------------------------------------------
+// Datos + tiendas frecuentes + última foto. YA NO trae el historial completo
+// (ver getPromoterHistoryPage abajo, paginado por día) — antes traía hasta
+// 200 visitas completas solo para sacar de ahí las tiendas más frecuentes y
+// la foto más reciente, cuando eso se puede calcular en la base de datos sin
+// traer las filas a memoria. Se usa desde el tablero del gerente/admin, del
+// supervisor (solo SUS promotores) y del propio promotor (su "Perfil").
+export async function getPromoterProfile(promoterId) {
   const promoter = await findPromoterById(promoterId);
   if (!promoter) return null;
 
-  const history = await prisma.visitRecord.findMany({
+  // Tiendas más frecuentes: se agrupa y cuenta EN LA BASE DE DATOS
+  // (groupBy), no trayendo cada visita a memoria para contarlas en JS.
+  const grouped = await prisma.visitRecord.groupBy({
+    by: ["storeId"],
     where: { promoterId },
-    include: { store: true },
-    orderBy: [{ day: "desc" }, { checkInTime: "desc" }],
-    take: limit,
+    _count: { storeId: true },
+    orderBy: { _count: { storeId: "desc" } },
+    take: 8,
   });
+  const storeIds = grouped.map((g) => g.storeId);
+  const stores = storeIds.length ? await prisma.store.findMany({ where: { id: { in: storeIds } }, select: { id: true, name: true } }) : [];
+  const storeNameById = new Map(stores.map((s) => [s.id, s.name]));
+  const frequentStores = grouped.map((g) => ({
+    storeId: g.storeId,
+    storeName: storeNameById.get(g.storeId) || g.storeId,
+    visits: g._count.storeId,
+  }));
 
-  const storeCounts = new Map();
-  for (const v of history) {
-    const key = v.storeId;
-    if (!storeCounts.has(key)) storeCounts.set(key, { storeId: key, storeName: v.store?.name || key, visits: 0 });
-    storeCounts.get(key).visits += 1;
-  }
-  const frequentStores = [...storeCounts.values()].sort((a, b) => b.visits - a.visits).slice(0, 8);
-
-  // `history` ya viene ordenado más reciente primero, así que su primer
-  // elemento ES la última visita — reusamos esa fila (ya la trajo Prisma) en
-  // vez de una consulta aparte. Se manda como campo SUELTO (no dentro de cada
-  // fila de `history`) para no inflar el payload con una foto por visita.
-  const latestPhoto = history[0]?.photo ?? null;
+  // Foto de la visita MÁS RECIENTE: una sola fila, una sola columna — no las
+  // 200 que se traían antes para usar solo esta.
+  const latest = await prisma.visitRecord.findFirst({
+    where: { promoterId },
+    orderBy: [{ day: "desc" }, { checkInTime: "desc" }],
+    select: { photo: true },
+  });
 
   return {
     id: promoter.id,
@@ -499,9 +530,43 @@ export async function getPromoterProfile(promoterId, limit = 200) {
     location: promoter.location ?? null,
     supervisor: promoter.supervisor ?? null,
     frequentStores,
-    latestPhoto,
-    history: history.map((v) => ({
-      day: v.day,
+    latestPhoto: latest?.photo ?? null,
+  };
+}
+
+// Historial de check-in/check-out de un promotor, PAGINADO POR DÍA (no por
+// fila): cada página trae `daysPerPage` días distintos (con TODAS sus
+// visitas de esos días, normalmente 1 por día), más recientes primero. Con
+// esto, un promotor con meses de historial ya no manda todo de golpe — ni
+// aquí ni en el Sheet, nada limitaba antes cuántas filas podía traer.
+// `hasMore` indica si hay días más viejos que la página actual.
+export async function getPromoterHistoryPage(promoterId, { page = 1, daysPerPage = 7 } = {}) {
+  const skip = Math.max(0, (page - 1) * daysPerPage);
+
+  // Un día de más (`daysPerPage + 1`) para saber si hay más páginas sin
+  // tener que contar el total de días por separado.
+  const distinctDays = await prisma.visitRecord.findMany({
+    where: { promoterId },
+    distinct: ["day"],
+    select: { day: true },
+    orderBy: { day: "desc" },
+    skip,
+    take: daysPerPage + 1,
+  });
+  const hasMore = distinctDays.length > daysPerPage;
+  const pageDays = distinctDays.slice(0, daysPerPage).map((d) => d.day);
+  if (pageDays.length === 0) return { days: [], page, daysPerPage, hasMore: false };
+
+  const rows = await prisma.visitRecord.findMany({
+    where: { promoterId, day: { in: pageDays } },
+    include: { store: true },
+    orderBy: [{ day: "desc" }, { checkInTime: "desc" }],
+    omit: { photo: true },
+  });
+
+  const byDay = new Map(pageDays.map((d) => [d, []]));
+  for (const v of rows) {
+    byDay.get(v.day)?.push({
       storeId: v.storeId,
       storeName: v.store?.name || v.storeId,
       status: v.status,
@@ -509,8 +574,10 @@ export async function getPromoterProfile(promoterId, limit = 200) {
       checkOutTime: v.checkOutTime,
       rollos: v.rollos,
       cubetas: v.cubetas,
-    })),
-  };
+    });
+  }
+  const days = pageDays.map((d) => ({ day: d, visits: byDay.get(d) ?? [] }));
+  return { days, page, daysPerPage, hasMore };
 }
 
 // ¿El promotor `promoterId` es supervisado por `supervisorId` (ID del

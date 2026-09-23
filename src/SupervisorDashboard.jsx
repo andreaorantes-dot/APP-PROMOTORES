@@ -253,7 +253,7 @@ export default function SupervisorDashboard() {
             <HelpCircle size={16} />
           </button>
           <NotificationBell />
-          <CompetenciaPanel fetcher={api.supervisorCompetencia} />
+          <CompetenciaPanel fetcher={api.supervisorCompetencia} photosFetcher={api.supervisorCompetenciaPhotos} />
           <button
             onClick={() => load()}
             disabled={loading}
