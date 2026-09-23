@@ -19,6 +19,17 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
+      # El plan "free" de Render da 512 MB de RAM; si el proceso se pasa, Render
+      # lo mata con SIGKILL sin aviso (así se cayó el servicio el 23 de
+      # septiembre). --max-old-space-size=400 le pone a V8 un techo MENOR a esos
+      # 512 MB (dejando margen para memoria fuera del heap de JS: el motor
+      # nativo de Prisma, buffers, etc.) — así, si algún día se vuelve a
+      # acercar al límite, V8 tira su propio error de "heap out of memory" CON
+      # stack trace en el log, en vez de un SIGKILL mudo del sistema operativo.
+      # No evita quedarse sin memoria; solo hace que, si pasa, quede un rastro
+      # diagnosticable.
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=400"
       # El servidor de Express sirve el frontend estático (mismo origen).
       - key: SERVE_STATIC
         value: "true"
