@@ -118,12 +118,30 @@ function drawResized(source, maxDim, quality) {
 // Camino rápido: createImageBitmap decodifica directo del archivo (sin pasar
 // por un <img> del DOM ni por un string Base64 intermedio) y bitmap.close()
 // libera esa memoria de inmediato en cuanto ya se copió al canvas chico, en
-// vez de esperar a que el garbage collector se acuerde — justo el tipo de
-// pico de memoria que dispara "memoria insuficiente" en Chrome/Android al
-// procesar fotos de cámara de varios MB. `imageOrientation: "from-image"`
-// mantiene el mismo auto-rotado por EXIF que ya hacía <img> por su cuenta.
+// vez de esperar a que el garbage collector se acuerde.
+//
+// `resizeWidth` es la parte que más importa para la memoria: sin esto,
+// createImageBitmap decodifica la foto a su resolución ORIGINAL completa
+// (una cámara de 48-108 MP son cientos de MB de píxeles crudos sin comprimir)
+// y RECIÉN AHÍ la dibujamos chica — ese pico de decodificar a resolución
+// completa, aunque sea un instante, es lo que sigue tronando "memoria
+// insuficiente" en los equipos más limitados. Con el hint, Chrome decodifica
+// ya achicado (aprovecha el downscale nativo del propio decodificador JPEG),
+// sin pasar nunca por el tamaño completo. Se da SOLO el ancho (no alto): así
+// el navegador calcula el alto preservando el aspect ratio real, sin deformar
+// la imagen sin importar si la foto es vertical u horizontal — drawResized
+// abajo hace el recorte EXACTO al tamaño final con ese aspect ratio ya
+// correcto. `imageOrientation: "from-image"` mantiene el mismo auto-rotado
+// por EXIF que ya hacía <img> por su cuenta.
 async function resizeImageViaBitmap(file, maxDim, quality) {
-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image", resizeWidth: maxDim, resizeQuality: "medium" });
+  } catch {
+    // Navegador sin soporte para los hints de resize -> decodifica a
+    // resolución completa como respaldo (mejor que fallar el check-in).
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  }
   try {
     return drawResized(bitmap, maxDim, quality);
   } finally {
@@ -151,20 +169,39 @@ function resizeImageViaImageElement(file, maxDim, quality) {
   });
 }
 
-// Redimensiona la imagen capturada a un máximo de `maxDim` px (lado mayor) y
-// la comprime a WebP (25-35% más liviano que JPEG a la misma calidad visual).
-// Reduce el peso antes de guardarla/enviarla — menos datos móviles del
-// promotor y menos espacio en Postgres (donde queda tal cual, en Base64).
-async function resizeImage(file, maxDim = 1024, quality = 0.7) {
+// Intenta procesar la foto a UN tamaño: primero con createImageBitmap (más
+// liviano), con el <img>+object URL como respaldo si falla o no está
+// disponible (formato raro, navegador viejo, etc.) — mismo tamaño en ambos.
+async function resizeImageAtSize(file, maxDim, quality) {
   if (typeof createImageBitmap === "function") {
     try {
       return await resizeImageViaBitmap(file, maxDim, quality);
     } catch {
-      // createImageBitmap no soportado para este archivo (formato raro, etc.)
-      // -> cae al respaldo de abajo, no se pierde el check-in por esto.
+      // cae al respaldo de abajo con el MISMO tamaño antes de probar uno más chico
     }
   }
   return resizeImageViaImageElement(file, maxDim, quality);
+}
+
+// Redimensiona la imagen capturada a un máximo de `maxDim` px (lado mayor) y
+// la comprime a WebP (25-35% más liviano que JPEG a la misma calidad visual).
+// Reduce el peso antes de guardarla/enviarla — menos datos móviles del
+// promotor y menos espacio en Postgres (donde queda tal cual, en Base64).
+//
+// Si el tamaño pedido sigue siendo demasiado para el teléfono (equipos muy
+// limitados, el "memoria insuficiente" que reportan los últimos rezagados),
+// reintenta con tamaños cada vez más chicos antes de rendirse — más vale una
+// foto más chica que ningún check-in.
+async function resizeImage(file, maxDim = 1024, quality = 0.7) {
+  const sizes = [...new Set([maxDim, 640, 400].filter((d) => d <= maxDim))];
+  for (const size of sizes) {
+    try {
+      return await resizeImageAtSize(file, size, quality);
+    } catch {
+      // intenta con el siguiente tamaño, más chico
+    }
+  }
+  throw new Error("No se pudo procesar la foto — puede ser falta de memoria en el teléfono. Cierra otras apps (o libera espacio: Ajustes > Apps > Chrome > Almacenamiento > Borrar caché) e intenta de nuevo.");
 }
 
 // La tipografía de marca es Helvetica (fuente de sistema); no se cargan fuentes
