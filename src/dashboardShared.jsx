@@ -372,7 +372,7 @@ export function EditGoalModal({ promoter, onSave, onClose, saving }) {
 }
 
 // --- Exportación CSV / Excel -------------------------------------------------
-export const EXPORT_HEADERS = ["ID", "Promotor", "Supervisor", "Estado", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Dinero"];
+export const EXPORT_HEADERS = ["ID", "Promotor", "Supervisor", "Estado", "ID Tienda", "Tienda", "Día", "Entrada", "Salida", "Rollos", "Cubetas", "Dinero"];
 
 export function buildExportRows(promoters, hour12 = true) {
   return promoters.flatMap((p) =>
@@ -384,6 +384,7 @@ export function buildExportRows(promoters, hour12 = true) {
       // por promotor) — no el de la tienda visitada (v.estado), a propósito:
       // mismo criterio que el filtro de estado del tablero.
       estado: p.estado || "Sin estado",
+      idTienda: v.storeId,
       tienda: v.storeName,
       dia: v.day || "",
       entrada: fmtDateTime(v.checkInTime, hour12),
@@ -414,7 +415,7 @@ export function downloadCsv(rows, filename) {
   };
   const lines = [EXPORT_HEADERS.join(",")];
   for (const r of rows) {
-    lines.push([r.id, r.promotor, r.supervisor, r.estado, r.tienda, r.dia, r.entrada, r.salida, r.rollos, r.cubetas, r.dinero].map(escape).join(","));
+    lines.push([r.id, r.promotor, r.supervisor, r.estado, r.idTienda, r.tienda, r.dia, r.entrada, r.salida, r.rollos, r.cubetas, r.dinero].map(escape).join(","));
   }
   // BOM al inicio: para que Excel detecte UTF-8 y no rompa los acentos/ñ.
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
@@ -427,7 +428,7 @@ export async function downloadXlsx(rows, filename) {
   if (!rows.length) return;
   const XLSX = await import("xlsx");
   const data = rows.map((r) => ({
-    ID: r.id, Promotor: r.promotor, Supervisor: r.supervisor, Estado: r.estado, Tienda: r.tienda, Día: r.dia,
+    ID: r.id, Promotor: r.promotor, Supervisor: r.supervisor, Estado: r.estado, "ID Tienda": r.idTienda, Tienda: r.tienda, Día: r.dia,
     Entrada: r.entrada, Salida: r.salida, Rollos: r.rollos, Cubetas: r.cubetas, Dinero: r.dinero,
   }));
   const ws = XLSX.utils.json_to_sheet(data);
