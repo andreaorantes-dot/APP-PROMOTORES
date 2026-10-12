@@ -41,6 +41,7 @@ const FEEDBACK_HEADERS = [
   "descripcion", // descripción amplia del error/problema
   "enviado_por", // ID de la sesión que envió el reporte (auditoría)
   "ubicacion", // coordenadas GPS "lat,lng" capturadas al enviar el reporte
+  "id_ticket", // ID del ticket (hilo de seguimiento) que se abrió con este reporte
 ];
  
 let sheetsClientPromise = null;
@@ -144,7 +145,7 @@ async function ensureFeedbackTab(sheets) {
 // Agrega una fila con un reporte de retroalimentación del asesor. A diferencia
 // del check-out, aquí SÍ propagamos el error al caller: la ruta necesita saber
 // si el reporte se guardó para responderle al asesor (no es best-effort mudo).
-export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripcion, enviadoPor, ubicacion }) {
+export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripcion, enviadoPor, ubicacion, idTicket }) {
   if (!isConfigured()) {
     throw new Error("La integración con Google Sheets no está configurada (faltan credenciales o GOOGLE_SHEETS_ID).");
   }
@@ -158,6 +159,7 @@ export async function appendFeedbackRow({ idPromotor, nombre, sucursal, descripc
     descripcion, // descripcion
     enviadoPor, // enviado_por (ID de la sesión)
     ubicacion || "", // ubicacion (lat,lng)
+    idTicket || "", // id_ticket (vacío si no se abrió ticket, p. ej. reportes de comportamiento)
   ];
   await sheets.spreadsheets.values.append({
     spreadsheetId: config.sheets.spreadsheetId,

@@ -22,6 +22,14 @@ class ApiError extends Error {
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+// Query string a partir de un objeto, omitiendo lo que venga vacío.
+function qs(params = {}) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") p.set(k, v);
+  const str = p.toString();
+  return str ? `?${str}` : "";
+}
+
 // Arma el query string `?range=...` de los resúmenes de gerente/supervisor,
 // agregando `from`/`to` solo cuando range="custom" (fecha personalizada).
 function rangeQuery(range, from, to) {
@@ -228,6 +236,25 @@ export const api = {
   trainingProgressSummary: (seccion, signal) => request(`/training/${seccion}/progress-summary`, { signal }),
   trainingProgress: (seccion, { tipo, orden, correct }) =>
     request(`/training/${seccion}/progress`, { method: "POST", body: { tipo, orden, correct } }),
+
+  // --- Hilos tipo foro (no chat en vivo): chat supervisor<->administración y
+  // seguimiento de tickets. Los comentarios se piden por páginas (`before` =
+  // fecha del comentario más viejo ya cargado) para no traer hilos largos de golpe.
+  threadsSummary: (signal) => request("/threads/summary", { signal }),
+
+  supervisorChat: ({ before, limit } = {}, signal) => request(`/threads/supervisor-chat${qs({ before, limit })}`, { signal }),
+  sendSupervisorChat: (text) => request("/threads/supervisor-chat", { method: "POST", body: { text } }),
+
+  adminChats: (signal) => request("/threads/supervisor-chats", { signal }),
+  adminChat: (supervisorId, { before, limit } = {}, signal) =>
+    request(`/threads/supervisor-chats/${encodeURIComponent(supervisorId)}${qs({ before, limit })}`, { signal }),
+  sendAdminChat: (supervisorId, text) =>
+    request(`/threads/supervisor-chats/${encodeURIComponent(supervisorId)}`, { method: "POST", body: { text } }),
+
+  tickets: ({ status, before, limit } = {}, signal) => request(`/threads/tickets${qs({ status, before, limit })}`, { signal }),
+  ticket: (id, { before, limit } = {}, signal) => request(`/threads/tickets/${encodeURIComponent(id)}${qs({ before, limit })}`, { signal }),
+  sendTicketComment: (id, text) => request(`/threads/tickets/${encodeURIComponent(id)}/comments`, { method: "POST", body: { text } }),
+  setTicketStatus: (id, status) => request(`/threads/tickets/${encodeURIComponent(id)}`, { method: "PATCH", body: { status } }),
 
   // --- Alertas automáticas de Retroalimentación (correo + push ntfy.sh) -----
   feedbackAlerts: (signal) => request("/feedback-alerts", { signal }),

@@ -8,9 +8,11 @@
 // Requiere sesión válida (requireAuth). El ID y el nombre vienen precargados en
 // el form desde la sesión, pero el asesor puede editarlos, así que además
 // guardamos `enviado_por` = ID real de la sesión como dato de auditoría.
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { requireAuth } from "../auth.js";
 import { appendFeedbackRow } from "../sheets.js";
+import { createTicket } from "../threadsDb.js";
  
 const router = Router();
 router.use(requireAuth);
@@ -43,6 +45,11 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ message: "Indica la sucursal relacionada con el problema." });
   }
  
+  // Cada reporte de un PROMOTOR abre un ticket con hilo de seguimiento (ver
+  // threadsDb.js). El ID se genera aquí para guardarlo también en la fila del
+  // Sheet y poder cruzar una con el otro.
+  const ticketId = req.promoter.role === "promotor" ? randomUUID() : "";
+
   try {
     await appendFeedbackRow({
       idPromotor: idPromotor || req.promoter.id,
@@ -51,8 +58,23 @@ router.post("/", async (req, res) => {
       descripcion,
       enviadoPor: req.promoter.id, // auditoría: quién está realmente logueado
       ubicacion, // coordenadas GPS capturadas al enviar el reporte
+      idTicket: ticketId,
     });
-    return res.status(201).json({ message: "¡Gracias! Tu retroalimentación fue registrada." });
+
+    // El reporte (fila del Sheet, que dispara las alertas a administración) ya
+    // quedó guardado; abrir el ticket es un extra — si falla, no se le niega
+    // al promotor que su reporte se registró, solo se queda sin seguimiento.
+    let ticket = null;
+    if (ticketId) {
+      try {
+        // El ticket va ligado a la SESIÓN (no al ID editable del form): de eso
+        // depende que cada promotor solo vea sus propios tickets.
+        ticket = await createTicket({ id: ticketId, promoterId: req.promoter.id, promoterName: nombre || req.promoter.name, sucursal, descripcion });
+      } catch (e) {
+        console.error("[feedback] El reporte se guardó pero no se pudo abrir el ticket:", e.message);
+      }
+    }
+    return res.status(201).json({ message: "¡Gracias! Tu retroalimentación fue registrada.", ticketId: ticket?.id ?? null });
   } catch (err) {
     console.error("[feedback] No se pudo guardar el reporte:", err.message);
     return res

@@ -28,6 +28,7 @@ model Promoter {
   visits             VisitRecord[]
   competitionReports CompetitionReport[]
   trainingProgress   TrainingProgress[]
+  threads            Thread[]
 }
 
 // Catálogo GLOBAL de tiendas (sin asignación por promotor). La visibilidad se
@@ -103,4 +104,44 @@ model TrainingProgress {
 
   @@unique([promoterId, seccion, tipo, itemKey])
   @@index([promoterId, seccion])
+}
+
+// Hilo de comentarios estilo FORO (no chat en vivo): una lista de comentarios
+// con autor, fecha y hora que se va agregando y respondiendo. Sirve para dos
+// cosas, distinguidas por `kind`:
+//   - "supervisor": el chat de UN supervisor con la administración (un solo
+//     hilo por supervisor, `supervisorId` único = su ID de login en minúsculas).
+//   - "ticket": el seguimiento de UN reporte ("Reportar") de un promotor. El
+//     texto original del reporte es el primer comentario del hilo.
+// `lastCommentAt`/`lastAuthorRole` se guardan aquí (denormalizados) para poder
+// listar hilos y calcular "sin leer" sin tener que leer los comentarios.
+model Thread {
+  id             String          @id @default(uuid())
+  kind           String // "supervisor" | "ticket"
+  supervisorId   String?         @unique
+  promoter       Promoter?       @relation(fields: [promoterId], references: [id])
+  promoterId     String?
+  sucursal       String?
+  title          String?
+  status         String          @default("abierto") // "abierto" | "cerrado" (solo tickets)
+  lastCommentAt  DateTime        @default(now())
+  lastAuthorRole String          @default("")
+  createdAt      DateTime        @default(now())
+  comments       ThreadComment[]
+
+  @@index([kind, lastCommentAt])
+  @@index([promoterId, lastCommentAt])
+}
+
+model ThreadComment {
+  id         String   @id @default(uuid())
+  thread     Thread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  threadId   String
+  authorId   String // ID de login de quien escribe (promotor, supervisor o admin)
+  authorName String
+  authorRole String // "promotor" | "supervisor" | "admin" | "gerente"
+  text       String
+  createdAt  DateTime @default(now())
+
+  @@index([threadId, createdAt])
 }

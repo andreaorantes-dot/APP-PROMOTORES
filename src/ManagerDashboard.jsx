@@ -30,6 +30,7 @@ import {
 import NotificationBell from "./NotificationBell.jsx";
 import PromoterProfile from "./PromoterProfile.jsx";
 import CompetenciaPanel from "./CompetenciaPanel.jsx";
+import AdminInbox from "./AdminInbox.jsx";
 import FeedbackAlertsPanel from "./FeedbackAlertsPanel.jsx";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
 
@@ -302,6 +303,7 @@ export default function ManagerDashboard() {
           </button>
           <NotificationBell />
           <CompetenciaPanel fetcher={api.managerCompetencia} photosFetcher={api.managerCompetenciaPhotos} />
+          <AdminInbox userId={user.id} role={user.role} />
           <FeedbackAlertsPanel />
           <button
             onClick={() => load()}

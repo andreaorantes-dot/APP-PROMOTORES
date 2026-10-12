@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound, Heart, HardDrive, Download, ChevronRight, ChevronLeft } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound, Heart, HardDrive, Download, ChevronRight, ChevronLeft, Ticket } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
 import { usePwaInstall } from "./lib/pwaInstall.js";
+import { useThreadsSummary } from "./lib/threads.js";
+import PromoterTickets from "./PromoterTickets.jsx";
 import TrainingSection from "./TrainingSection.jsx";
 import {
   enqueueAction,
@@ -484,6 +486,16 @@ export default function PromotoresApp() {
   const { status, user, error: authError, login, logout } = useAuth();
   const onboarding = useOnboarding(ONBOARDING_KEY_PROMOTOR);
   const { canInstall, isStandalone, promptInstall } = usePwaInstall();
+
+  // Seguimiento de tickets (cada reporte de "Reportar" abre uno): resumen para
+  // el punto de "respuesta nueva" del botón de la barra superior. No es en
+  // vivo — se pide al entrar, al volver a la app y cada 2 minutos.
+  const threads = useThreadsSummary({ userId: user?.id, role: "promotor", enabled: status === "authed" && Boolean(user), pollMs: 120000 });
+  const [ticketsInitialId, setTicketsInitialId] = useState(null);
+  function openTickets(id) {
+    setTicketsInitialId(typeof id === "string" ? id : null); // onClick pasa el evento: solo cuenta un ID de ticket
+    setScreen("tickets");
+  }
 
   // Último paso del onboarding: instalar la app a la pantalla de inicio.
   // Se arma aparte (no en la lista estática) porque su texto y su botón
@@ -1262,9 +1274,9 @@ export default function PromotoresApp() {
   if (screen === "dashboard") {
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} onHelp={onboarding.show} />
+        <TopBar user={user} onTickets={openTickets} ticketsUnread={threads.ticketsPending} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} onHelp={onboarding.show} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
-        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} onTrack={(id) => { setShowFeedback(false); openTickets(id); }} />}
         {presenceModalNode}
         {onboarding.open && <OnboardingTour steps={onboardingStepsPromotor} onClose={onboarding.dismiss} />}
         <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
@@ -1355,9 +1367,9 @@ export default function PromotoresApp() {
     const isCheckedIn = record?.status === "checked-in";
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <TopBar user={user} onTickets={openTickets} ticketsUnread={threads.ticketsPending} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
-        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} onTrack={(id) => { setShowFeedback(false); openTickets(id); }} />}
         {presenceModalNode}
         <div style={{ padding: "18px 20px 40px", maxWidth: 460, margin: "0 auto" }}>
           <button onClick={() => setScreen("dashboard")} style={{ background: "none", border: "none", color: COLORS.textMuted, display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14 }}>
@@ -1546,9 +1558,9 @@ export default function PromotoresApp() {
     const canSendComp = compMarca.trim() && compDesc.trim();
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh" }}>
-        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <TopBar user={user} onTickets={openTickets} ticketsUnread={threads.ticketsPending} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
-        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} onTrack={(id) => { setShowFeedback(false); openTickets(id); }} />}
         {presenceModalNode}
         <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           <span style={{ fontSize: 11, letterSpacing: "0.1em", color: COLORS.textMuted, fontWeight: 600 }}>COMPETENCIA</span>
@@ -1640,9 +1652,9 @@ export default function PromotoresApp() {
     const title = seccion === "capacitacion" ? "Capacitación" : "Soporte";
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh" }}>
-        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <TopBar user={user} onTickets={openTickets} ticketsUnread={threads.ticketsPending} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
-        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} onTrack={(id) => { setShowFeedback(false); openTickets(id); }} />}
         {presenceModalNode}
         <div style={{ padding: "20px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           <TrainingSection seccion={seccion} title={title} />
@@ -1657,9 +1669,9 @@ export default function PromotoresApp() {
     const initials = (user.name || user.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh" }}>
-        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <TopBar user={user} onTickets={openTickets} ticketsUnread={threads.ticketsPending} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
-        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} onTrack={(id) => { setShowFeedback(false); openTickets(id); }} />}
         {presenceModalNode}
         <div style={{ padding: "28px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           <div style={{ width: 64, height: 64, borderRadius: "50%", background: COLORS.accentSoft, color: COLORS.accentText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, margin: "0 auto 12px" }}>
@@ -1707,12 +1719,26 @@ export default function PromotoresApp() {
     );
   }
 
+  if (screen === "tickets") {
+    return (
+      <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
+        <TopBar user={user} onTickets={openTickets} ticketsUnread={threads.ticketsPending} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} onTrack={(id) => { setShowFeedback(false); openTickets(id); }} />}
+        {presenceModalNode}
+        <div style={{ padding: "18px 20px 40px", maxWidth: 480, margin: "0 auto" }}>
+          <PromoterTickets key={ticketsInitialId ?? "lista"} user={user} initialTicketId={ticketsInitialId} threads={threads} onExit={() => setScreen("dashboard")} />
+        </div>
+      </div>
+    );
+  }
+
   if (screen === "historial") {
     return (
       <div style={{ ...bgTexture, minHeight: "100dvh", fontFamily: "Inter" }}>
-        <TopBar user={user} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
+        <TopBar user={user} onTickets={openTickets} ticketsUnread={threads.ticketsPending} onFeedback={() => setShowFeedback(true)} onProfile={() => goTab("perfil")} />
         <ConnectivityBanner online={online} pending={pending} syncing={syncing} onSync={flushQueue} />
-        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} />}
+        {showFeedback && <FeedbackModal user={user} onClose={() => setShowFeedback(false)} onTrack={(id) => { setShowFeedback(false); openTickets(id); }} />}
         {presenceModalNode}
         <div style={{ padding: "18px 20px 96px", maxWidth: 480, margin: "0 auto" }}>
           <button onClick={() => setScreen("perfil")} style={{ background: "none", border: "none", color: COLORS.textMuted, display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: 0, marginBottom: 14 }}>
@@ -1808,7 +1834,7 @@ function Brand() {
   );
 }
 
-function TopBar({ user, onFeedback, onProfile, onHelp }) {
+function TopBar({ user, onFeedback, onProfile, onHelp, onTickets, ticketsUnread = 0 }) {
   const initials = (user.name || user.id || "?").split(" ").map((n) => n[0]).slice(0, 2).join("");
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: `1px solid ${COLORS.border}` }}>
@@ -1821,6 +1847,16 @@ function TopBar({ user, onFeedback, onProfile, onHelp }) {
             style={{ width: 34, height: 34, borderRadius: "50%", background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.textMuted, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
           >
             <HelpCircle size={16} />
+          </button>
+        )}
+        {onTickets && (
+          <button
+            onClick={onTickets}
+            title="Mis tickets: seguimiento de tus reportes"
+            style={{ position: "relative", width: 34, height: 34, borderRadius: "50%", background: "transparent", border: `1px solid ${COLORS.border}`, color: COLORS.textMuted, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+          >
+            <Ticket size={16} />
+            {ticketsUnread > 0 && <span style={{ position: "absolute", top: -2, right: -2, width: 11, height: 11, borderRadius: 999, background: COLORS.danger, border: `2px solid ${COLORS.surface}` }} />}
           </button>
         )}
         {onFeedback && (
@@ -1935,12 +1971,13 @@ function Row({ label, value, last }) {
 // la sucursal se escribe a mano (para poder reportar sucursales que no aparecen
 // en el catálogo) y la descripción es un campo amplio. Al enviar, se guarda una
 // fila en la pestaña de retroalimentación del Google Sheet.
-function FeedbackModal({ user, onClose }) {
+function FeedbackModal({ user, onClose, onTrack }) {
   const [idPromotor, setIdPromotor] = useState(user?.id ?? "");
   const [nombre, setNombre] = useState(user?.name ?? "");
   const [sucursal, setSucursal] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [state, setState] = useState("idle"); // idle | sending | sent | error
+  const [ticketId, setTicketId] = useState(null); // ticket que abrió el reporte (para darle seguimiento)
   const [errorMsg, setErrorMsg] = useState("");
   const [loc, setLoc] = useState({ status: "loading", coords: null }); // ubicación en tiempo real
 
@@ -1964,13 +2001,14 @@ function FeedbackModal({ user, onClose }) {
     setState("sending");
     setErrorMsg("");
     try {
-      await api.sendFeedback({
+      const res = await api.sendFeedback({
         idPromotor: idPromotor.trim(),
         nombre: nombre.trim(),
         sucursal: sucursal.trim(),
         descripcion: descripcion.trim(),
         ubicacion: loc.coords ? `${loc.coords.lat.toFixed(6)},${loc.coords.lng.toFixed(6)}` : "",
       });
+      setTicketId(res?.ticketId ?? null);
       setState("sent");
     } catch (e) {
       setState("error");
@@ -2005,10 +2043,21 @@ function FeedbackModal({ user, onClose }) {
             <h3 style={{ fontFamily: "Space Grotesk", fontSize: 18, fontWeight: 600, color: COLORS.text, margin: "0 0 6px" }}>¡Gracias por tu reporte!</h3>
             <p style={{ fontSize: 13, color: COLORS.textMuted, margin: "0 0 20px", lineHeight: 1.5 }}>
               Tu retroalimentación se registró. El equipo de Inteligencia Comercial la revisará.
+              {ticketId ? " Abrimos un ticket para que le des seguimiento: ahí puedes agregar comentarios y un administrador te responde." : ""}
             </p>
+            {ticketId && onTrack && (
+              <button
+                onClick={() => onTrack(ticketId)}
+                style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: "pointer", marginBottom: 10 }}
+              >
+                Ver seguimiento de mi reporte
+              </button>
+            )}
             <button
               onClick={onClose}
-              style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: "pointer" }}
+              style={ticketId && onTrack
+                ? { width: "100%", padding: "12px 0", borderRadius: 10, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.text, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: "pointer" }
+                : { width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: COLORS.accent, color: COLORS.onAccent, fontFamily: "Inter", fontWeight: 600, fontSize: 14.5, cursor: "pointer" }}
             >
               Cerrar
             </button>

@@ -20,6 +20,7 @@ import promoterProfileRoutes from "./routes/promoterProfile.js";
 import competitionRoutes from "./routes/competition.js";
 import trainingRoutes from "./routes/training.js";
 import feedbackAlertsRoutes from "./routes/feedbackAlerts.js";
+import threadsRoutes from "./routes/threads.js";
 
 // Robustez: un error no capturado en una petición NO debe tumbar el servidor
 // (si se cae, TODOS los promotores pierden el servicio). Registramos y seguimos.
@@ -70,6 +71,7 @@ app.use("/api/promoters", promoterProfileRoutes); // GET /api/promoters/:id/prof
 app.use("/api/competition", competitionRoutes); // POST /api/competition (reportes de competencia)
 app.use("/api/training", trainingRoutes); // Capacitación/Soporte (onboarding, quiz, flashcards)
 app.use("/api/feedback-alerts", feedbackAlertsRoutes); // config de alertas automáticas de Retroalimentación
+app.use("/api/threads", threadsRoutes); // hilos tipo foro: chat supervisor<->admin y seguimiento de tickets
 
 // Diagnóstico de Google Sheets (requiere sesión): verifica credenciales y acceso
 // al documento sin necesidad de un check-out real.

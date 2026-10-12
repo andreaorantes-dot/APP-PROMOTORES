@@ -26,6 +26,7 @@ import {
 import NotificationBell from "./NotificationBell.jsx";
 import PromoterProfile from "./PromoterProfile.jsx";
 import CompetenciaPanel from "./CompetenciaPanel.jsx";
+import SupervisorChat from "./SupervisorChat.jsx";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
 
 // Onboarding del SUPERVISOR — sube la versión cuando se agreguen features.
@@ -254,6 +255,7 @@ export default function SupervisorDashboard() {
           </button>
           <NotificationBell />
           <CompetenciaPanel fetcher={api.supervisorCompetencia} photosFetcher={api.supervisorCompetenciaPhotos} />
+          <SupervisorChat userId={user.id} />
           <button
             onClick={() => load()}
             disabled={loading}
