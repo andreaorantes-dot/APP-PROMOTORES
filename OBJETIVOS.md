@@ -76,6 +76,95 @@ sobre datos del día, no sobre reportes que llegan días después.
 - Administrar desde el tablero las **alertas de retroalimentación** (correo +
   push): encenderlas/apagarlas y agregar o quitar destinatarios.
 
+## Objetivos de mejora (roadmap)
+
+Dos mejoras técnicas nuevas, ordenadas por prioridad. Describen el resultado
+esperado, no la implementación; el diseño se define al empezar cada una.
+
+### 1. Reemplazar el mapa que falla en producción
+
+**Problema.** El mapa actual (Leaflet con teselas de OpenStreetMap, ambos
+cargados desde un CDN: `dashboardShared.jsx` en los tableros y
+`PromotoresApp.jsx` en la app del promotor) falla en producción. Hoy el código
+ya tiene un aviso de respaldo ("el mapa no cargó…") para cuando la red bloquea
+OpenStreetMap o el CDN. *Causa por confirmar:* el servidor público de
+teselas de OpenStreetMap limita o rechaza el uso desde aplicaciones
+desplegadas, y los scripts externos dependen de que la red del celular o de la
+oficina los deje pasar.
+
+**Objetivo.** Un mapa que cargue de forma confiable en producción, en el
+tablero de gerente/supervisor y en la pantalla de tiendas cercanas del
+promotor, sin depender de un servidor gratuito sin garantía de servicio.
+
+**Cómo sabremos que se logró:**
+- El mapa carga en producción en las redes y dispositivos que usa el equipo
+  (datos móviles, Wi-Fi de oficina, gama baja), sin mostrar el aviso de respaldo.
+- Se conservan los marcadores, el filtro por segmento y el clic en un KPI que
+  resalta a los promotores en el mapa.
+- Si el proveedor falla, la app sigue funcionando con el listado y degrada el
+  mapa sin romper la pantalla.
+- Costo y límites de uso del proveedor documentados, y la llave (si se
+  requiere) fuera del código.
+
+**A definir:** proveedor de teselas (con o sin llave y plan de pago), si los
+scripts y estilos de Leaflet se empaquetan con la app en vez de cargarlos del
+CDN, y cómo se verifica antes de desplegar.
+
+### 2. Cámara nativa de la app, para celulares de gama baja
+
+**Problema.** La foto de check-in y las de Competencia se toman con el
+selector de archivos del sistema (`<input type="file" capture>`), que abre la
+app de cámara del teléfono. En equipos de gama baja eso consume mucha memoria,
+puede cerrar o recargar la app mientras el promotor toma la foto, y la imagen
+llega en resolución completa y hay que reducirla después (ya hay un parche de
+memoria en `PromotoresApp.jsx`, commits `86eb337` y `5c4eb60`).
+
+**Objetivo.** Una cámara integrada a la app que capture directamente a un
+tamaño y calidad ya reducidos, para que cualquier promotor pueda subir su foto
+de evidencia sin importar su teléfono.
+
+**Cómo sabremos que se logró:**
+- La foto de check-in y las de Competencia se toman dentro de la app, sin
+  salir a la cámara del sistema.
+- Se captura ya reducida (resolución y peso objetivo definidos), sin pasar por
+  la imagen en resolución completa.
+- Funciona sin señal: la foto entra a la cola offline cifrada que ya existe y
+  se sincroniza al reconectar.
+- Si el navegador niega el permiso o no soporta la cámara integrada, queda
+  la opción actual como respaldo, para que nadie se quede sin poder registrar
+  su visita.
+- Se prueba en al menos un teléfono de gama baja representativo del equipo.
+
+**A definir:** resolución y peso máximos por foto, y si se agrega una marca de
+agua con fecha, hora y ubicación (refuerza la evidencia de que la foto se tomó
+en la tienda).
+
+#### 2.1 Diagnóstico del dispositivo y la red (base para mejoras futuras)
+
+Ligado al anterior: medir las condiciones reales de cada teléfono para
+adaptar la app y entender por qué falla en campo.
+
+- **Qué medir:** tipo y calidad de conexión (Wi-Fi, 4G, 3G, modo ahorro de
+  datos), memoria del dispositivo, memoria usada por la app, núcleos de CPU,
+  versión de sistema y navegador, y cuánto tardan la captura, el
+  procesamiento y la subida de cada foto. Se apoya en las capacidades que
+  exponga el navegador; no todas existen en todos los equipos y en iPhone
+  son limitadas.
+- **Qué hacer con eso:**
+  1. *Adaptar automáticamente:* elegir la resolución y la calidad de la foto
+     según el equipo y la red (menos pixeles y más compresión en gama baja o
+     conexión lenta), y diferir la subida a una red mejor.
+  2. *Detectar fallas antes de que ocurran:* avisar al promotor y registrar el
+     problema cuando la memoria es crítica o la subida falla repetidamente.
+  3. *Informar a gerencia:* un resumen de qué dispositivos y redes presentan
+     más problemas, para decidir mejoras con datos.
+- **Privacidad:** se guardan solo métricas técnicas del equipo, sin contenido
+  personal, y se documenta qué se recolecta. Se confirma con el negocio antes
+  de activarlo.
+- **Estado:** idea para futuras mejoras. Primero se diseña qué métricas
+  valen la pena y dónde se guardarían (por ejemplo, en la base de datos junto
+  a cada visita o en una pestaña propia del Sheet).
+
 ## Qué mide la app hoy
 
 - **Actividad**: check-in/out por tienda y por día (hora, ubicación validada,
