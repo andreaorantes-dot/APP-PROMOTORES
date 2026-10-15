@@ -67,6 +67,13 @@ APP-PROMOTORES/
 │  │                              # con reporte de "comportamiento extraño" por visita
 │  ├─ CompetenciaPanel.jsx       # Modal de revisión de reportes de Competencia
 │  │                              # (admin/gerente ve todos; supervisor, solo su equipo)
+│  ├─ AdminInbox.jsx             # Buzón de admin/gerente: tickets de promotores + hilos de supervisores
+│  ├─ SupervisorChat.jsx         # Hilo del supervisor con administración
+│  ├─ PromoterTickets.jsx        # Tickets del promotor (reportar un problema y darle seguimiento)
+│  ├─ ThreadView.jsx             # Vista compartida de un hilo de comentarios
+│  ├─ TrainingSection.jsx        # Capacitación / Soporte (contenido, quiz, tarjetas)
+│  ├─ FeedbackAlertsPanel.jsx    # Admin: alertas de retroalimentación (correo + push)
+│  ├─ NotificationsHistory.jsx   # Historial de notificaciones, paginado por día
 │  ├─ OnboardingTour.jsx         # Guía de novedades por rol (ver más abajo)
 │  ├─ theme.js                   # Paleta de marca Protexa (compartida por todo)
 │  ├─ auth/AuthProvider.jsx      # Sesión (useAuth), llama a /api/auth/session
@@ -87,8 +94,14 @@ APP-PROMOTORES/
 │  │  ├─ activitySheet.js         # SOLO desarrollo local: reconstruye el resumen del
 │  │  │                           # gerente desde el Sheet cuando VISITS_SOURCE=sheet
 │  │  ├─ managerSummary.js        # Agregación PURA (sin BD) del resumen del gerente
+│  │  ├─ threadsDb.js             # Hilos tipo foro (supervisor↔admin y tickets): modelo y paginación
+│  │  ├─ trainingSheet.js         # Contenido de Capacitación/Soporte desde el Sheet
+│  │  ├─ feedbackAlertsSheet.js   # Config de las alertas de retroalimentación (Sheet)
+│  │  ├─ presenceSheet.js         # Confirmaciones de "sigo en tienda"
+│  │  ├─ weeklyReport.js / mailer.js  # Reporte semanal (in-app + correo SMTP opcional)
 │  │  └─ routes/                  # auth, stores, visits, feedback, competition,
-│  │                               # manager, supervisor, notifications, promoterProfile
+│  │                               # manager, supervisor, notifications, promoterProfile,
+│  │                               # threads, training, feedbackAlerts
 │  └─ scripts/                    # Alta de usuarios, metas, diagnóstico (ver abajo)
 ├─ render.yaml                    # Blueprint de despliegue en Render
 ├─ OBJETIVOS.md                   # Para qué existe la app, por rol
@@ -143,6 +156,9 @@ Todo vive en **un solo documento** ("BBDD Promotores"), con estas pestañas:
 | **Competencia** | Fila-resumen (fecha, promotor, marca, descripción, nº de fotos) de cada reporte | `competitionSheet.js` **escribe** aquí; el panel de revisión (`CompetenciaPanel.jsx`) **lee** de la base de datos, no de esta pestaña — las fotos NO están aquí, viven en `CompetitionReport` |
 | **Actividad Diaria** | Auditoría de cada check-in/check-out: entrada, salida, rollos, cubetas (la escribe `sheets.js`) | Solo lectura en desarrollo local (`VISITS_SOURCE=sheet`); en producción el resumen del gerente usa la base de datos real, no esta pestaña |
 | **Retroalimentacion** | Reportes de "algo no funciona" desde la app del promotor **y** reportes de "comportamiento extraño" que admin/gerente/supervisor levantan desde el historial de un promotor (mismo formato, distinto `enviado_por`) | `sheets.js` (`appendFeedbackRow`) |
+| **Confirmación en tienda** | Respuesta Sí/No a "¿sigues en la tienda?" con la ubicación del momento | `presenceSheet.js` (solo escribe) |
+| **Capacitacion**, **Capacitacion_Quiz**, **Capacitacion_Flashcards** | Contenido de las secciones Capacitación y Soporte (columna `Seccion` las distingue). Se crean solas con encabezados | `trainingSheet.js` (lee, con caché) |
+| **AlertasRetroConfig**, **AlertasRetroDestinatarios** | Activo (SI/NO) + tema de ntfy.sh, y la lista de correos que reciben la alerta de retroalimentación nueva | `feedbackAlertsSheet.js` (desde el tablero del admin); las envía un Google Apps Script (ver MANUAL_DESPLIEGUE.md) |
 
 Cómo se autentica el backend: un **Service Account** de Google Cloud, con el
 documento compartido con su `client_email` como editor. Ver
@@ -153,7 +169,10 @@ documento compartido con su `client_email` como editor. Ver
 Modelos en `backend/prisma/schema.prisma`: `Promoter`, `Store`, `VisitRecord`
 (rollos, cubetas, con la foto del check-in en Base64 — la columna `galones`
 sigue en el esquema por compatibilidad con datos históricos, pero ya no se
-usa en ningún flujo), `CompetitionReport` (con sus fotos en Base64, JSON-array). Motor:
+usa en ningún flujo), `CompetitionReport` (con sus fotos en Base64, JSON-array),
+`TrainingProgress` (avance en quiz y tarjetas Leitner por persona), y `Thread` /
+`ThreadComment` (hilos tipo foro: `kind` = `supervisor` o `ticket`; los tickets
+tienen `status` abierto/cerrado). Motor:
 
 - **Local:** SQLite (`backend/prisma/dev.db`).
 - **Render:** PostgreSQL (gestionado por Render, ver `render.yaml`).
@@ -204,10 +223,12 @@ Centro **dentro de la app** (campana, se actualiza sola cada 30s) — no hay pus
 real al sistema operativo. Cinco tipos, guardados en la pestaña "Notificaciones":
 
 1. **`checkin`** — un promotor hizo check-in → aviso a **su supervisor** (con
-   tienda y nombre).
-2. **`promoter_goal`** — un promotor alcanzó su meta del mes → aviso a **su
-   supervisor** (una sola vez por mes, idempotente).
-3. **`store_goal`** — una tienda alcanzó su meta del mes → aviso a **admin**.
+   tienda, nombre y si llegó a tiempo o tarde contra su hora de "Entrada", con
+   `LATE_TOLERANCE_MINUTES` = 15; la hora se compara en la zona horaria del
+   estado del promotor).
+2. **`promoter_goal`** — un promotor alcanzó su meta semanal → aviso a **su
+   supervisor** (una sola vez por periodo, idempotente).
+3. **`store_goal`** — una tienda alcanzó su meta semanal → aviso a **admin**.
 4. **`password_recovery`** — alguien pidió recuperar su cuenta desde el login
    → aviso a su supervisor (o a "admin" si es un promotor sin supervisor, o
    si quien la pidió es admin/gerente/supervisor). No resetea nada por sí
@@ -311,6 +332,53 @@ notifica a "admin". La respuesta al cliente es **idéntica exista o no el ID**
 reseteo real sigue siendo manual (`backend/scripts/reset-password.mjs`) — no
 hay reseteo self-service todavía.
 
+## Seguimiento tipo foro (tickets y chat con administración)
+
+No es un chat en vivo: cada hilo se carga al abrirlo y con un botón
+"Actualizar", y los comentarios se paginan (50 por página). Código:
+`backend/src/threadsDb.js` (datos) y `backend/src/routes/threads.js`.
+
+- **Tickets**: los reportes que el promotor envía con "Reportar" se convierten
+  en un ticket (`Thread.kind = "ticket"`, `status` abierto/cerrado). El
+  promotor ve y comenta **solo los suyos** (`PromoterTickets.jsx`); admin/gerente
+  los ven todos, responden y pueden **cerrarlos o reabrirlos** (`AdminInbox.jsx`).
+- **Chat supervisor↔administración**: un hilo por supervisor (el ID se
+  normaliza a minúsculas para que nunca tenga dos). El supervisor ve solo el
+  suyo (`SupervisorChat.jsx`); admin/gerente ven el de cualquiera.
+- Cada comentario guarda autor, rol y hora; el hilo guarda quién habló último
+  para calcular "sin leer" sin cargar los comentarios.
+
+## Capacitación y Soporte
+
+Dos secciones con la misma mecánica (`:seccion` = `capacitacion` | `soporte`):
+**Capacitación** es cómo hacer mejor el trabajo, **Soporte** es información
+técnica de producto. El contenido se edita en el Sheet (pestañas
+`Capacitacion`, `Capacitacion_Quiz`, `Capacitacion_Flashcards`, que se crean
+solas con encabezados; sin filas la pantalla muestra un estado vacío). Incluye
+bienvenida, bloques, tooltips, un quiz de opción múltiple y tarjetas de repaso
+espaciado (sistema Leitner, cajas 1–5). El progreso de cada persona se guarda en
+`TrainingProgress` bajo el ID de quien esté logueado; admin/gerente/supervisor
+pueden previsualizar. Código: `backend/src/trainingSheet.js`,
+`routes/training.js`, `src/TrainingSection.jsx`.
+
+## Alertas de retroalimentación (correo + push)
+
+Cuando llega una fila nueva a la pestaña `Retroalimentacion`, se avisa por
+correo y por push (ntfy.sh). **Quien envía no es este backend sino un Google
+Apps Script** atado al Sheet que revisa cada pocos minutos (ver
+MANUAL_DESPLIEGUE.md). El backend solo lee y escribe la configuración
+(`AlertasRetroConfig`, `AlertasRetroDestinatarios`) para que el admin la maneje
+desde el panel del tablero (`FeedbackAlertsPanel.jsx`): encender/apagar, tema
+de ntfy y destinatarios. Solo admin/gerente.
+
+## Confirmación de "sigo en tienda"
+
+Una vez al día, en un momento aleatorio entre 10 am y 4 pm y solo mientras el
+promotor tiene un check-in abierto, la app le pregunta Sí/No. Al responder se
+intenta capturar su GPS (si falla o lo niega, la respuesta no se bloquea) y se
+guarda una fila en la pestaña `Confirmación en tienda`. No se revalida contra
+el radio de la tienda. Ruta: `POST /api/visits/:storeId/confirm-presence`.
+
 ## Recordatorio de check-out
 
 Si el promotor tiene un check-in abierto (sin check-out) y ya es tarde (≥19:00
@@ -332,17 +400,31 @@ Rutas bajo `VITE_API_BASE` (por defecto `/api`, mismo origen).
 | POST | `/visits/:storeId/check-in` | promotor | `{ coords, photo }`. Foto obligatoria. |
 | POST | `/visits/:storeId/check-out` | promotor | `{ coords, rollos, cubetas }`. Escribe la fila en Actividad Diaria + revisa metas. |
 | GET | `/visits/today` | promotor | Visitas de hoy del promotor logueado |
-| GET | `/visits/my-goal` | promotor | Su meta mensual y avance, o `null` |
+| POST | `/visits/:storeId/confirm-presence` | promotor | `{ sigueEnTienda, coords? }`. Respuesta a "¿sigues en la tienda?"; exige check-in abierto (409 si no). |
+| GET | `/visits/my-goal` | promotor | Su meta semanal y avance, o `null` |
 | POST | `/feedback` | promotor | Reporte de "algo no funciona" |
 | POST | `/competition` | promotor | `{ marca, descripcion, fotos? }` (hasta 5) |
 | GET | `/manager/summary?range=` | gerente/admin | `today\|yesterday\|week\|last_week\|month\|last_month\|year\|last_year`. Resumen nacional. |
-| PUT | `/manager/promoter/:id/goal` | gerente/admin | `{ meta, nombre? }`. Fija la meta mensual. |
+| PUT | `/manager/promoter/:id/goal` | gerente/admin | `{ meta, nombre? }`. Fija la meta semanal (unidades-equivalentes). |
 | GET | `/manager/competencia` | gerente/admin | Reportes de Competencia (todos), más recientes primero. |
 | GET | `/supervisor/summary?range=` | supervisor | Mismo resumen, acotado a sus promotores |
 | GET | `/supervisor/competencia` | supervisor | Mismos reportes de Competencia, acotados a su equipo |
 | GET | `/notifications` | admin/gerente/supervisor | Las suyas + insight Top 5 (solo admin/gerente) |
 | GET | `/promoters/:id/profile` | cualquiera | Historial (promotor: solo el suyo; supervisor: solo los suyos) |
 | POST | `/promoters/:id/report-behavior` | admin/gerente/supervisor | `{ day, storeName, descripcion }`. Reporta comportamiento extraño sobre una visita; se guarda como retroalimentación. |
+| GET | `/threads/summary` | cualquiera con sesión | Resumen de hilos/tickets sin leer |
+| GET/POST | `/threads/supervisor-chat` | supervisor | Su hilo con administración (leer / comentar) |
+| GET | `/threads/supervisor-chats` | gerente/admin | Lista de hilos de supervisores |
+| GET/POST | `/threads/supervisor-chats/:supervisorId` | gerente/admin | Leer / responder el hilo de un supervisor |
+| GET | `/threads/tickets` | promotor, gerente/admin | Tickets (el promotor solo ve los suyos) |
+| GET | `/threads/tickets/:id` | dueño o admin/gerente | Un ticket con sus comentarios (paginados) |
+| POST | `/threads/tickets/:id/comments` | dueño o admin/gerente | Comentar un ticket |
+| PATCH | `/threads/tickets/:id` | gerente/admin | Cerrar o reabrir un ticket |
+| GET | `/training/:seccion/onboarding` · `/quiz` · `/flashcards` · `/progress-summary` | cualquiera con sesión | Contenido y avance de Capacitación o Soporte (`:seccion` = `capacitacion` \| `soporte`) |
+| POST | `/training/:seccion/progress` | cualquiera con sesión | Guarda el resultado de una pregunta o tarjeta |
+| GET/PUT | `/feedback-alerts` | gerente/admin | Lee / cambia Activo y tema de ntfy.sh |
+| POST/DELETE | `/feedback-alerts/destinatarios[/:email]` | gerente/admin | Agrega / quita un destinatario del correo |
+| GET | `/manager/competencia/:id/photos` · `/supervisor/competencia/:id/photos` | gerente/admin · supervisor | Fotos de un reporte de Competencia (se cargan aparte para no pesar la lista) |
 | GET | `/sheets/status` | cualquiera con sesión | Diagnóstico de la conexión a Google Sheets |
 | GET | `/health` | público | Health check de Render |
 
