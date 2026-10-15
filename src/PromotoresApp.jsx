@@ -5,6 +5,11 @@ import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
 import OnboardingTour, { useOnboarding } from "./OnboardingTour.jsx";
 import { usePwaInstall } from "./lib/pwaInstall.js";
+import { useLeaflet } from "./lib/useLeaflet.js";
+import { attachBaseMap } from "./lib/mapTiles.js";
+import CameraCapture, { cameraSupported } from "./CameraCapture.jsx";
+import { processPickedFile } from "./lib/photoPipeline.js";
+import { getDeviceProfile, formatForReport, TIER_LABEL, NETWORK_LABEL } from "./lib/deviceProfile.js";
 import { useThreadsSummary } from "./lib/threads.js";
 import PromoterTickets from "./PromoterTickets.jsx";
 import TrainingSection from "./TrainingSection.jsx";
@@ -82,129 +87,6 @@ function gpsErrorMessage(err) {
   return "No se pudo obtener tu ubicación GPS.";
 }
 
-// ¿El navegador codifica WebP de verdad? Algunos navegadores viejos ignoran
-// el mime type pedido y devuelven PNG en silencio (sin comprimir nada) en vez
-// de fallar — hay que revisar el resultado, no solo asumir que funcionó. Se
-// calcula una sola vez y se cachea (canvas.toDataURL no es gratis).
-let webpSupported = null;
-function supportsWebP() {
-  if (webpSupported === null) {
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = 1;
-    webpSupported = canvas.toDataURL("image/webp").startsWith("data:image/webp");
-  }
-  return webpSupported;
-}
-
-// Dibuja una imagen ya decodificada (ImageBitmap o HTMLImageElement, ambos
-// exponen width/height y son válidos para drawImage) en un canvas de a lo más
-// `maxDim` px de lado mayor, y la codifica a WebP (respaldo a JPEG si el
-// navegador no lo soporta de verdad).
-function drawResized(source, maxDim, quality) {
-  let { width, height } = source;
-  if (width >= height && width > maxDim) {
-    height = Math.round((height * maxDim) / width);
-    width = maxDim;
-  } else if (height > maxDim) {
-    width = Math.round((width * maxDim) / height);
-    height = maxDim;
-  }
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext("2d").drawImage(source, 0, 0, width, height);
-  const format = supportsWebP() ? "image/webp" : "image/jpeg";
-  return canvas.toDataURL(format, quality);
-}
-
-// Camino rápido: createImageBitmap decodifica directo del archivo (sin pasar
-// por un <img> del DOM ni por un string Base64 intermedio) y bitmap.close()
-// libera esa memoria de inmediato en cuanto ya se copió al canvas chico, en
-// vez de esperar a que el garbage collector se acuerde.
-//
-// `resizeWidth` es la parte que más importa para la memoria: sin esto,
-// createImageBitmap decodifica la foto a su resolución ORIGINAL completa
-// (una cámara de 48-108 MP son cientos de MB de píxeles crudos sin comprimir)
-// y RECIÉN AHÍ la dibujamos chica — ese pico de decodificar a resolución
-// completa, aunque sea un instante, es lo que sigue tronando "memoria
-// insuficiente" en los equipos más limitados. Con el hint, Chrome decodifica
-// ya achicado (aprovecha el downscale nativo del propio decodificador JPEG),
-// sin pasar nunca por el tamaño completo. Se da SOLO el ancho (no alto): así
-// el navegador calcula el alto preservando el aspect ratio real, sin deformar
-// la imagen sin importar si la foto es vertical u horizontal — drawResized
-// abajo hace el recorte EXACTO al tamaño final con ese aspect ratio ya
-// correcto. `imageOrientation: "from-image"` mantiene el mismo auto-rotado
-// por EXIF que ya hacía <img> por su cuenta.
-async function resizeImageViaBitmap(file, maxDim, quality) {
-  let bitmap;
-  try {
-    bitmap = await createImageBitmap(file, { imageOrientation: "from-image", resizeWidth: maxDim, resizeQuality: "medium" });
-  } catch {
-    // Navegador sin soporte para los hints de resize -> decodifica a
-    // resolución completa como respaldo (mejor que fallar el check-in).
-    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-  }
-  try {
-    return drawResized(bitmap, maxDim, quality);
-  } finally {
-    bitmap.close();
-  }
-}
-
-// Respaldo para navegadores sin createImageBitmap (o que fallan al decodificar
-// con él). Usa un object URL — no FileReader.readAsDataURL — para no duplicar
-// el archivo ORIGINAL completo como un string Base64 en memoria solo para
-// decodificarlo.
-function resizeImageViaImageElement(file, maxDim, quality) {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const img = new Image();
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("Imagen inválida"));
-    };
-    img.onload = () => {
-      URL.revokeObjectURL(objectUrl); // ya decodificada: el archivo original ya no hace falta
-      resolve(drawResized(img, maxDim, quality));
-    };
-    img.src = objectUrl;
-  });
-}
-
-// Intenta procesar la foto a UN tamaño: primero con createImageBitmap (más
-// liviano), con el <img>+object URL como respaldo si falla o no está
-// disponible (formato raro, navegador viejo, etc.) — mismo tamaño en ambos.
-async function resizeImageAtSize(file, maxDim, quality) {
-  if (typeof createImageBitmap === "function") {
-    try {
-      return await resizeImageViaBitmap(file, maxDim, quality);
-    } catch {
-      // cae al respaldo de abajo con el MISMO tamaño antes de probar uno más chico
-    }
-  }
-  return resizeImageViaImageElement(file, maxDim, quality);
-}
-
-// Redimensiona la imagen capturada a un máximo de `maxDim` px (lado mayor) y
-// la comprime a WebP (25-35% más liviano que JPEG a la misma calidad visual).
-// Reduce el peso antes de guardarla/enviarla — menos datos móviles del
-// promotor y menos espacio en Postgres (donde queda tal cual, en Base64).
-//
-// Si el tamaño pedido sigue siendo demasiado para el teléfono (equipos muy
-// limitados, el "memoria insuficiente" que reportan los últimos rezagados),
-// reintenta con tamaños cada vez más chicos antes de rendirse — más vale una
-// foto más chica que ningún check-in.
-async function resizeImage(file, maxDim = 1024, quality = 0.7) {
-  const sizes = [...new Set([maxDim, 640, 400].filter((d) => d <= maxDim))];
-  for (const size of sizes) {
-    try {
-      return await resizeImageAtSize(file, size, quality);
-    } catch {
-      // intenta con el siguiente tamaño, más chico
-    }
-  }
-  throw new Error("No se pudo procesar la foto — puede ser falta de memoria en el teléfono. Cierra otras apps (o libera espacio: Ajustes > Apps > Chrome > Almacenamiento > Borrar caché) e intenta de nuevo.");
-}
 
 // La tipografía de marca es Helvetica (fuente de sistema); no se cargan fuentes
 // web. Se conserva el hook como no-op para no tocar el resto del componente.
@@ -291,52 +173,40 @@ function Radar({ distance, inRange, gpsError, hasFix }) {
 }
 
 // ---------------------------------------------------------------------------
-// Mapa (OpenStreetMap + Leaflet, cargado desde CDN — gratis, sin API key).
+// Mapa (Leaflet empaquetado con la app; teselas con respaldo en lib/mapTiles.js).
 // Muestra la ubicación real del promotor y, opcionalmente, las tiendas cercanas.
 // ---------------------------------------------------------------------------
 function MapView({ coords, stores = [] }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const userRef = useRef(null);
-  const [ready, setReady] = useState(typeof window !== "undefined" && !!window.L);
-  const [failed, setFailed] = useState(false); // no se pudo cargar Leaflet (p.ej. red bloqueada)
+  const tilesRef = useRef(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const { L, failed: loadFailed } = useLeaflet(retryKey); // Leaflet viene empaquetado con la app
+  const [tilesFailed, setTilesFailed] = useState(false); // ningún proveedor de teselas respondió
+  const failed = loadFailed || tilesFailed;
 
-  // Carga Leaflet (CSS + JS) desde CDN una sola vez.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.L) { setReady(true); return; }
-    if (!document.getElementById("leaflet-css")) {
-      const link = document.createElement("link");
-      link.id = "leaflet-css";
-      link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      document.head.appendChild(link);
-    }
-    let s = document.getElementById("leaflet-js");
-    if (!s) {
-      s = document.createElement("script");
-      s.id = "leaflet-js";
-      s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-      s.async = true;
-      document.body.appendChild(s);
-    }
-    s.addEventListener("load", () => setReady(true));
-    s.addEventListener("error", () => setFailed(true));
-    // Si en 8s no cargó Leaflet (red corporativa bloqueando el CDN), marca fallo.
-    const t = setTimeout(() => { if (!window.L) setFailed(true); }, 8000);
-    return () => clearTimeout(t);
-  }, []);
+  function destroyMap() {
+    if (tilesRef.current) { tilesRef.current.destroy(); tilesRef.current = null; }
+    if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    userRef.current = null;
+  }
+
+  function retry() {
+    destroyMap();
+    setTilesFailed(false);
+    setRetryKey((k) => k + 1);
+  }
 
   // Limpieza al desmontar.
-  useEffect(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } }, []);
+  useEffect(() => destroyMap, []);
 
   // Inicializa / actualiza el mapa cuando hay coordenadas.
   useEffect(() => {
-    const L = window.L;
-    if (!ready || !L || !coords || !elRef.current) return;
+    if (!L || !coords || !elRef.current) return;
     if (!mapRef.current) {
       mapRef.current = L.map(elRef.current, { zoomControl: false, attributionControl: true }).setView([coords.lat, coords.lng], 15);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(mapRef.current);
+      tilesRef.current = attachBaseMap(L, mapRef.current, { onFail: () => setTilesFailed(true) });
       const icon = L.divIcon({
         className: "",
         html: `<div style="color:${COLORS.accent};filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg></div>`,
@@ -349,12 +219,11 @@ function MapView({ coords, stores = [] }) {
       userRef.current.setLatLng([coords.lat, coords.lng]);
     }
     setTimeout(() => mapRef.current && mapRef.current.invalidateSize(), 150);
-  }, [ready, coords]);
+  }, [L, coords, retryKey]);
 
   // Marcadores de las tiendas cercanas.
   useEffect(() => {
-    const L = window.L;
-    if (!ready || !L || !mapRef.current) return;
+    if (!L || !mapRef.current) return;
     mapRef.current.__stores = mapRef.current.__stores || L.layerGroup().addTo(mapRef.current);
     const layer = mapRef.current.__stores;
     layer.clearLayers();
@@ -367,10 +236,10 @@ function MapView({ coords, stores = [] }) {
       const label = s.id ? `${s.name} - ${s.id}` : s.name;
       L.marker([s.lat, s.lng], { icon }).bindTooltip(label, { direction: "top" }).addTo(layer);
     }
-  }, [ready, stores]);
+  }, [L, stores, retryKey]);
 
-  // Fallback si el mapa no cargó (p.ej. la red bloquea unpkg/OpenStreetMap):
-  // muestra las coordenadas en texto en lugar de un recuadro vacío.
+  // Fallback si el mapa no cargó (sin red, o ningún proveedor de teselas
+  // respondió): muestra las coordenadas en texto en lugar de un recuadro vacío.
   if (failed) {
     return (
       <div style={{ marginBottom: 14, height: 160, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: COLORS.surface, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, padding: 14, textAlign: "center" }}>
@@ -379,8 +248,11 @@ function MapView({ coords, stores = [] }) {
           {coords ? `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : "Ubicación no disponible"}
         </span>
         <span style={{ fontSize: 11, color: COLORS.textMuted, lineHeight: 1.4 }}>
-          El mapa no cargó en esta red. Se verá al desplegar o con otra conexión.
+          El mapa no cargó con esta conexión. Puedes seguir registrando tu visita.
         </span>
+        <button onClick={retry} style={{ marginTop: 2, padding: "6px 14px", borderRadius: 9, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          Reintentar
+        </button>
       </div>
     );
   }
@@ -391,6 +263,70 @@ function MapView({ coords, stores = [] }) {
       {!coords && (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.textMuted, fontSize: 12.5, pointerEvents: "none" }}>
           Obteniendo tu ubicación…
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Diagnóstico del teléfono (pestaña Perfil): muestra qué detectó la app del
+// dispositivo y la red, y qué tamaño/calidad de foto está usando por eso. Sirve
+// de apoyo a soporte ("léeme lo que dice ahí") y se adjunta resumido a los
+// reportes. Todo se calcula en el teléfono; ver lib/deviceProfile.js.
+function DeviceDiagnostics() {
+  const [open, setOpen] = useState(false);
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    getDeviceProfile().then((p) => { if (alive) setProfile(p); });
+    return () => { alive = false; };
+  }, [open]);
+
+  const s = profile?.snapshot;
+  const c = profile?.classification;
+  const m = profile?.metrics;
+  const rows = profile ? [
+    ["Nivel del equipo", TIER_LABEL[c.tier]],
+    ["Red", `${NETWORK_LABEL[c.network]}${s.netType ? ` (${s.netType})` : ""}${s.saveData ? " · ahorro de datos" : ""}`],
+    ["Memoria RAM", s.memoryGB != null ? `${s.memoryGB} GB` : "No disponible"],
+    ["Núcleos", s.cores != null ? String(s.cores) : "No disponible"],
+    ["Sistema", s.os || "No disponible"],
+    ["Espacio libre", s.storageFreeMB != null ? `${s.storageFreeMB} MB` : "No disponible"],
+    ["Foto de visita", `${profile.visit.maxDim} px · calidad ${Math.round(profile.visit.quality * 100)}%`],
+    ["Fotos recientes", m.total ? `${m.ok} bien · ${m.failed} con falla${m.medianMs != null ? ` · ${Math.round(m.medianMs)} ms` : ""}` : "Aún sin fotos"],
+  ] : [];
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}
+      >
+        <HardDrive size={15} color={COLORS.accentText} />
+        <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: COLORS.text }}>Diagnóstico de mi teléfono</span>
+        <ChevronRight size={15} color={COLORS.textMuted} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }} />
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "6px 14px" }}>
+          {!profile ? (
+            <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "10px 0" }}>Midiendo…</p>
+          ) : (
+            <>
+              {rows.map(([k, v], i) => (
+                <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "9px 0", borderBottom: i < rows.length - 1 ? `1px solid ${COLORS.border}` : "none" }}>
+                  <span style={{ fontSize: 12.5, color: COLORS.textMuted }}>{k}</span>
+                  <span style={{ fontSize: 12.5, color: COLORS.text, fontWeight: 600, textAlign: "right" }}>{v}</span>
+                </div>
+              ))}
+              {c.reasons.length > 0 && (
+                <p style={{ fontSize: 11.5, color: COLORS.textMuted, margin: "4px 0 10px", lineHeight: 1.45 }}>
+                  La app reduce el tamaño de tus fotos porque detectó: {c.reasons.join(", ")}.
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -576,7 +512,9 @@ export default function PromotoresApp() {
   const [compSent, setCompSent] = useState(false);
   const [compSending, setCompSending] = useState(false);
   const [compError, setCompError] = useState("");
-  const compFileRef = useRef(null);
+  const compFileRef = useRef(null); // galería (varias fotos)
+  const compCaptureRef = useRef(null); // cámara del sistema (respaldo si no abre la integrada)
+  const [cameraFor, setCameraFor] = useState(null); // cámara integrada abierta: "visit" | "competition" | null
   const MAX_COMP_FOTOS = 5;
   const [rollos, setRollos] = useState(0);
   const [cubetas, setCubetas] = useState(0);
@@ -926,12 +864,25 @@ export default function PromotoresApp() {
     if (!file) return;
     setPhotoBusy(true);
     try {
-      setPhoto(await resizeImage(file));
+      setPhoto(await processPickedFile(file, "visit"));
     } catch (err) {
       alert(err.message || "No se pudo procesar la foto.");
     } finally {
       setPhotoBusy(false);
     }
+  }
+
+  // Abre la cámara integrada de la app; si el navegador no la soporta, cae al
+  // selector de archivos del sistema (la cámara del teléfono de siempre).
+  function openCamera(kind) {
+    if (cameraSupported()) setCameraFor(kind);
+    else openSystemCamera(kind);
+  }
+
+  function openSystemCamera(kind) {
+    setCameraFor(null);
+    const ref = kind === "visit" ? fileInputRef : compCaptureRef;
+    setTimeout(() => ref.current && ref.current.click(), 0);
   }
 
   // Actualiza el estado en memoria y refresca la caché cifrada en disco.
@@ -1089,7 +1040,7 @@ export default function PromotoresApp() {
     const room = MAX_COMP_FOTOS - compFotos.length;
     for (const file of files.slice(0, room)) {
       try {
-        const dataUrl = await resizeImage(file, 900, 0.6);
+        const dataUrl = await processPickedFile(file, "competition");
         setCompFotos((prev) => [...prev, { name: file.name, dataUrl }]);
       } catch {
         /* ignora archivos inválidos */
@@ -1406,7 +1357,7 @@ export default function PromotoresApp() {
                   <span style={{ fontSize: 11, letterSpacing: "0.08em", color: COLORS.textMuted, fontWeight: 600 }}>
                     FOTO DE LA VISITA (OBLIGATORIA)
                   </span>
-                  {/* input de cámara: en móvil abre la cámara trasera */}
+                  {/* Respaldo: la cámara del sistema (se usa solo si la integrada no está disponible) */}
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -1415,9 +1366,17 @@ export default function PromotoresApp() {
                     onChange={handlePhotoChange}
                     style={{ display: "none" }}
                   />
+                  {cameraFor === "visit" && (
+                    <CameraCapture
+                      kind="visit"
+                      onCapture={(dataUrl) => setPhoto(dataUrl)}
+                      onClose={() => setCameraFor(null)}
+                      onUnavailable={() => openSystemCamera("visit")}
+                    />
+                  )}
                   {!photo ? (
                     <button
-                      onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                      onClick={() => openCamera("visit")}
                       disabled={photoBusy}
                       style={{ width: "100%", marginTop: 10, padding: "13px 0", borderRadius: 12, border: `1px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontFamily: "Inter", fontWeight: 600, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
                     >
@@ -1428,7 +1387,7 @@ export default function PromotoresApp() {
                     <div style={{ marginTop: 10, position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
                       <img src={photo} alt="Foto de la visita" style={{ width: "100%", display: "block", maxHeight: 220, objectFit: "cover" }} />
                       <button
-                        onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                        onClick={() => openCamera("visit")}
                         style={{ position: "absolute", right: 10, bottom: 10, padding: "7px 12px", borderRadius: 9, border: "none", background: "rgba(15,22,32,0.82)", color: COLORS.text, fontSize: 12.5, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
                       >
                         <Camera size={14} /> Retomar
@@ -1599,13 +1558,33 @@ export default function PromotoresApp() {
 
               <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Evidencia (fotos, hasta {MAX_COMP_FOTOS})</label>
               <input ref={compFileRef} type="file" accept="image/*" multiple onChange={handleCompFotos} style={{ display: "none" }} />
+              <input ref={compCaptureRef} type="file" accept="image/*" capture="environment" onChange={handleCompFotos} style={{ display: "none" }} />
+              {cameraFor === "competition" && (
+                <CameraCapture
+                  kind="competition"
+                  multi
+                  max={MAX_COMP_FOTOS}
+                  count={compFotos.length}
+                  onCapture={(dataUrl) => setCompFotos((prev) => [...prev, { name: `foto-${Date.now()}.webp`, dataUrl }])}
+                  onClose={() => setCameraFor(null)}
+                  onUnavailable={() => openSystemCamera("competition")}
+                />
+              )}
               {compFotos.length < MAX_COMP_FOTOS && (
-                <button
-                  onClick={() => compFileRef.current && compFileRef.current.click()}
-                  style={{ width: "100%", padding: "16px 0", borderRadius: 12, border: `1.5px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-                >
-                  <ImagePlus size={16} color={COLORS.accentText} /> Subir fotos
-                </button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => openCamera("competition")}
+                    style={{ flex: 1, padding: "16px 0", borderRadius: 12, border: `1.5px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                  >
+                    <Camera size={16} color={COLORS.accentText} /> Tomar foto
+                  </button>
+                  <button
+                    onClick={() => compFileRef.current && compFileRef.current.click()}
+                    style={{ flex: 1, padding: "16px 0", borderRadius: 12, border: `1.5px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                  >
+                    <ImagePlus size={16} color={COLORS.accentText} /> Galería
+                  </button>
+                </div>
               )}
               {compFotos.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
@@ -1706,6 +1685,8 @@ export default function PromotoresApp() {
             <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: COLORS.text }}>Mi historial de check-in / check-out</span>
             <ChevronRight size={15} color={COLORS.textMuted} />
           </button>
+
+          <DeviceDiagnostics />
 
           <button
             onClick={handleLogout}
@@ -2001,11 +1982,15 @@ function FeedbackModal({ user, onClose, onTrack }) {
     setState("sending");
     setErrorMsg("");
     try {
+      // Resumen técnico del teléfono (memoria, red, fotos recientes) para que
+      // soporte entienda problemas de campo; nunca bloquea el envío.
+      let diagnostico = "";
+      try { diagnostico = `\n\n${formatForReport(await getDeviceProfile())}`; } catch { /* sin diagnóstico */ }
       const res = await api.sendFeedback({
         idPromotor: idPromotor.trim(),
         nombre: nombre.trim(),
         sucursal: sucursal.trim(),
-        descripcion: descripcion.trim(),
+        descripcion: `${descripcion.trim()}${diagnostico}`,
         ubicacion: loc.coords ? `${loc.coords.lat.toFixed(6)},${loc.coords.lng.toFixed(6)}` : "",
       });
       setTicketId(res?.ticketId ?? null);
@@ -2068,7 +2053,7 @@ function FeedbackModal({ user, onClose, onTrack }) {
               <div>
                 <h3 style={{ fontFamily: "Space Grotesk", fontSize: 17, fontWeight: 600, color: COLORS.text, margin: "0 0 4px" }}>Reportar un problema</h3>
                 <p style={{ fontSize: 12.5, color: COLORS.textMuted, margin: "0 0 18px", lineHeight: 1.5 }}>
-                  Cuéntanos qué pasó con el mayor detalle posible para poder ayudarte.
+                  Cuéntanos qué pasó con el mayor detalle posible para poder ayudarte. Se adjunta un resumen técnico de tu teléfono (memoria y red).
                 </p>
               </div>
               <button

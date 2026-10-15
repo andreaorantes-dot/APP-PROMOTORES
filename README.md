@@ -74,6 +74,7 @@ APP-PROMOTORES/
 │  ├─ TrainingSection.jsx        # Capacitación / Soporte (contenido, quiz, tarjetas)
 │  ├─ FeedbackAlertsPanel.jsx    # Admin: alertas de retroalimentación (correo + push)
 │  ├─ NotificationsHistory.jsx   # Historial de notificaciones, paginado por día
+│  ├─ CameraCapture.jsx          # Cámara integrada (foto de check-in y Competencia)
 │  ├─ OnboardingTour.jsx         # Guía de novedades por rol (ver más abajo)
 │  ├─ theme.js                   # Paleta de marca Protexa (compartida por todo)
 │  ├─ auth/AuthProvider.jsx      # Sesión (useAuth), llama a /api/auth/session
@@ -481,6 +482,79 @@ localforage). Nada queda en texto plano en el dispositivo.
 > Modelo de amenaza (honesto): protege los datos **en reposo** (inspección del
 > IndexedDB, backups del teléfono). NO protege contra malware que ejecute JS
 > dentro de la página con la sesión abierta.
+
+## Mapa
+
+Leaflet viaja **dentro del build** (`src/lib/useLeaflet.js`, chunk aparte que
+solo se descarga al abrir un mapa); ya no se carga de un CDN. Las teselas salen
+de `src/lib/mapTiles.js`, con respaldo automático:
+
+1. Proveedor propio, si se define `VITE_MAP_TILE_URL` (+ `VITE_MAP_TILE_ATTRIBUTION`
+   y `VITE_MAP_TILE_MAX_ZOOM`) **al compilar**. En Render son variables de
+   entorno del servicio; el `Dockerfile` las recibe como argumentos de build.
+2. Esri World Street Map.
+3. CARTO Voyager.
+
+El primer proveedor que entrega una tesela gana y se recuerda en el dispositivo;
+si uno no entrega nada (4 errores o 8 s), se pasa al siguiente. Si ninguno
+funciona, la pantalla muestra un aviso con el botón "Reintentar" y el listado
+sigue funcionando.
+
+**OpenStreetMap no se usa**: sus servidores públicos responden 403 "Access
+blocked — App is not following the tile usage policy" a esta app. Ese 403 llega
+como una imagen (el cartel de bloqueo) que el navegador dibuja como una tesela
+normal, así que **no se puede detectar** desde el cliente y no sirve ni como
+respaldo. Esri y CARTO son gratuitos pero sin garantía de servicio; para una
+garantía real, contratar un proveedor con llave y usar `VITE_MAP_TILE_URL`
+(la llave queda visible en el navegador: restringirla por dominio).
+
+El service worker (`public/sw.js`) solo cachea recursos del propio origen; las
+teselas las maneja el navegador.
+
+## Cámara integrada
+
+`src/CameraCapture.jsx` abre la cámara trasera con `getUserMedia` y captura el
+cuadro **directamente a un tamaño reducido** (WebP, con JPEG de respaldo): la
+foto a resolución completa nunca existe en memoria, que era lo que cerraba la
+app en teléfonos de gama baja. Se usa en la foto de check-in y en Competencia
+(ahí permite varias fotos seguidas, con contador "Foto n de 5"). Las fotos
+siguen el mismo camino de siempre (data URL → cola offline cifrada si no hay
+señal).
+
+Respaldo: si el navegador no soporta la cámara integrada, el promotor niega el
+permiso o la cámara no abre, se ofrece "Usar la cámara del teléfono" (el
+selector de archivos con `capture`). En Competencia también hay un botón
+"Galería". La cámara se suelta al cerrar, al llegar al máximo de fotos o si la
+app pasa a segundo plano. Código compartido de imagen: `src/lib/imageTools.js`
+y `src/lib/photoPipeline.js` (archivos elegidos).
+
+Requiere HTTPS (o `localhost`), igual que el GPS.
+
+## Diagnóstico del dispositivo y la red
+
+`src/lib/deviceProfile.js` clasifica el teléfono (gama baja/media/alta) y la red
+(buena/lenta/sin conexión) con las señales que expone el navegador: memoria
+(`deviceMemory`), núcleos, tipo de conexión y ahorro de datos, límite de memoria
+del navegador, versión de Android, espacio libre y el **historial de las
+últimas 20 fotos** (si fallaron 2 de las últimas 10, el equipo baja de nivel
+aunque sus especificaciones sean buenas). Las señales que el navegador no da
+(en iPhone casi todas) simplemente no cuentan.
+
+Con eso recomienda tamaño y calidad de la foto y los parámetros de la cámara:
+
+| Nivel | Foto de visita | Competencia | Cámara |
+|---|---|---|---|
+| Gama baja | 800 px · 60 % | 700 px · 50 % | 640×480 a 15 fps |
+| Gama media | 1,024 px · 70 % | 900 px · 60 % | 960×720 a 24 fps |
+| Gama alta | 1,280 px · 75 % | 1,100 px · 65 % | 1280×720 a 30 fps |
+
+(La gama media conserva los valores que la app ya usaba.) Con red lenta se baja
+además a ≤ 800/700 px y −5 % de calidad.
+
+Dónde se ve: **Perfil → "Diagnóstico de mi teléfono"** y, en una línea, al
+final de cada reporte de problema (ticket). Todo se calcula y guarda en el
+teléfono (`localStorage`, clave `device_photo_metrics_v1`); **no se envía nada
+al servidor** salvo esa línea en los reportes.
 
 ## "Día de negocio" en hora de México (no UTC)
 

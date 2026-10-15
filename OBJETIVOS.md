@@ -85,12 +85,15 @@ esperado, no la implementación; el diseño se define al empezar cada una.
 
 **Problema.** El mapa actual (Leaflet con teselas de OpenStreetMap, ambos
 cargados desde un CDN: `dashboardShared.jsx` en los tableros y
-`PromotoresApp.jsx` en la app del promotor) falla en producción. Hoy el código
-ya tiene un aviso de respaldo ("el mapa no cargó…") para cuando la red bloquea
-OpenStreetMap o el CDN. *Causa por confirmar:* el servidor público de
-teselas de OpenStreetMap limita o rechaza el uso desde aplicaciones
-desplegadas, y los scripts externos dependen de que la red del celular o de la
-oficina los deje pasar.
+`PromotoresApp.jsx` en la app del promotor) falla en producción. *Causa confirmada
+(15-oct-2026, captura del tablero de admin):* el servidor público de teselas de
+OpenStreetMap responde **403 "Access blocked — App is not following the tile
+usage policy"** para esta app. Ese 403 llega como una imagen (el cartel de
+bloqueo), que el navegador dibuja como si fuera una tesela normal, por eso el
+mapa se ve lleno de carteles amarillos y negros y el aviso de respaldo nunca
+aparecía. Además, Leaflet se descargaba de un CDN externo, que depende de que la
+red del celular o de la oficina lo deje pasar, y el service worker guardaba las
+teselas de otros dominios para siempre y sin límite.
 
 **Objetivo.** Un mapa que cargue de forma confiable en producción, en el
 tablero de gerente/supervisor y en la pantalla de tiendas cercanas del
@@ -106,9 +109,17 @@ promotor, sin depender de un servidor gratuito sin garantía de servicio.
 - Costo y límites de uso del proveedor documentados, y la llave (si se
   requiere) fuera del código.
 
-**A definir:** proveedor de teselas (con o sin llave y plan de pago), si los
-scripts y estilos de Leaflet se empaquetan con la app en vez de cargarlos del
-CDN, y cómo se verifica antes de desplegar.
+**Estado (15-oct-2026): implementado en la rama local `feature/mapa-camara`,
+pendiente de probar en producción.** Leaflet ahora viaja dentro del build
+(chunk aparte, solo se descarga al abrir un mapa); OpenStreetMap salió de la
+lista; las teselas vienen de Esri y, si no responde, de CARTO, con aviso de
+respaldo y botón "Reintentar" si ninguna carga; el service worker ya no toca
+dominios ajenos. Detalle en README, sección "Mapa".
+
+**A definir con el negocio:** esos dos proveedores son gratuitos y **sin
+garantía de servicio**. Para una garantía real hay que contratar uno con llave
+(MapTiler, Mapbox, Stadia, ArcGIS...) y definir `VITE_MAP_TILE_URL` en Render;
+el código ya lo soporta sin cambios.
 
 ### 2. Cámara nativa de la app, para celulares de gama baja
 
@@ -135,9 +146,17 @@ de evidencia sin importar su teléfono.
   su visita.
 - Se prueba en al menos un teléfono de gama baja representativo del equipo.
 
-**A definir:** resolución y peso máximos por foto, y si se agrega una marca de
-agua con fecha, hora y ubicación (refuerza la evidencia de que la foto se tomó
-en la tienda).
+**Estado (15-oct-2026): implementado en la rama local `feature/mapa-camara`,
+falta probarlo en teléfonos reales.** Cámara integrada (`CameraCapture.jsx`)
+en la foto de check-in y en Competencia (varias fotos seguidas), con la cámara
+del sistema como respaldo. Probada en un navegador con una cámara simulada
+(captura reducida, permiso denegado, varias fotos, liberación de la cámara);
+**no se ha probado con una cámara real ni en un teléfono de gama baja**.
+
+**A definir:** el peso máximo por foto (hoy se fija por resolución y calidad
+según el nivel del equipo: de 700 a 1,280 px) y si se agrega una marca de agua
+con fecha, hora y ubicación (refuerza la evidencia de que la foto se tomó en la
+tienda).
 
 #### 2.1 Diagnóstico del dispositivo y la red (base para mejoras futuras)
 
@@ -161,9 +180,16 @@ adaptar la app y entender por qué falla en campo.
 - **Privacidad:** se guardan solo métricas técnicas del equipo, sin contenido
   personal, y se documenta qué se recolecta. Se confirma con el negocio antes
   de activarlo.
-- **Estado:** idea para futuras mejoras. Primero se diseña qué métricas
-  valen la pena y dónde se guardarían (por ejemplo, en la base de datos junto
-  a cada visita o en una pestaña propia del Sheet).
+- **Estado (15-oct-2026): primera versión implementada en la rama local
+  `feature/mapa-camara`.** Detecta nivel del equipo (gama baja/media/alta) y
+  calidad de la red, ajusta resolución y calidad de la foto y los parámetros
+  de la cámara, guarda localmente las últimas 20 fotos (tiempo, peso, fallas),
+  muestra todo en Perfil → "Diagnóstico de mi teléfono" y adjunta un resumen
+  de una línea a cada reporte de problema (ticket). **Todo se queda en el
+  teléfono**: aún no hay envío automático al servidor ni resumen para gerencia
+  (punto 3), y falta el aviso proactivo al promotor cuando la memoria es
+  crítica (parte del punto 2; hoy las fallas repetidas solo bajan la calidad
+  de las fotos siguientes).
 
 ## Qué mide la app hoy
 

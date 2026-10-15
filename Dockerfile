@@ -7,6 +7,16 @@ COPY index.html vite.config.js ./
 COPY src ./src
 COPY public ./public
 COPY scripts ./scripts
+# Proveedor de mapa propio (opcional). Vite las incrusta en el bundle, así que
+# deben existir al compilar: en Render, define estas variables de entorno del
+# servicio y se pasan aquí como argumentos de build. Vacías = proveedores por
+# defecto (ver src/lib/mapTiles.js).
+ARG VITE_MAP_TILE_URL=""
+ARG VITE_MAP_TILE_ATTRIBUTION=""
+ARG VITE_MAP_TILE_MAX_ZOOM=""
+ENV VITE_MAP_TILE_URL=$VITE_MAP_TILE_URL \
+    VITE_MAP_TILE_ATTRIBUTION=$VITE_MAP_TILE_ATTRIBUTION \
+    VITE_MAP_TILE_MAX_ZOOM=$VITE_MAP_TILE_MAX_ZOOM
 RUN npm run build
 
 # --- Etapa 2: runtime (Express sirve API + frontend estático) ---------------

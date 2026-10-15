@@ -6,6 +6,8 @@
 import { useState, useEffect, useRef } from "react";
 import { MapPin, Maximize2, Minimize2, ChevronUp, ChevronDown, ChevronLeft, Target } from "lucide-react";
 import { COLORS } from "./theme.js";
+import { useLeaflet } from "./lib/useLeaflet.js";
+import { attachBaseMap } from "./lib/mapTiles.js";
 
 // --- Formato ----------------------------------------------------------------
 const moneyFmt = new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN", maximumFractionDigits: 0 });
@@ -91,58 +93,46 @@ export function Brand() {
 }
 
 // ---------------------------------------------------------------------------
-// Mapa nacional (Leaflet + OpenStreetMap por CDN, igual que la app).
+// Mapa nacional (Leaflet empaquetado con la app; teselas con respaldo en lib/mapTiles.js).
 // ---------------------------------------------------------------------------
 export function NationalMap({ promoters, onSelect }) {
   const elRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
-  const [ready, setReady] = useState(typeof window !== "undefined" && !!window.L);
-  const [failed, setFailed] = useState(false);
+  const tilesRef = useRef(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const { L, failed: loadFailed } = useLeaflet(retryKey); // Leaflet viene empaquetado con la app
+  const [tilesFailed, setTilesFailed] = useState(false); // ningún proveedor de teselas respondió
+  const failed = loadFailed || tilesFailed;
 
-  // Carga Leaflet una sola vez.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.L) { setReady(true); return; }
-    if (!document.getElementById("leaflet-css")) {
-      const link = document.createElement("link");
-      link.id = "leaflet-css";
-      link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      document.head.appendChild(link);
-    }
-    let s = document.getElementById("leaflet-js");
-    if (!s) {
-      s = document.createElement("script");
-      s.id = "leaflet-js";
-      s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-      s.async = true;
-      document.body.appendChild(s);
-    }
-    s.addEventListener("load", () => setReady(true));
-    s.addEventListener("error", () => setFailed(true));
-    const t = setTimeout(() => { if (!window.L) setFailed(true); }, 8000);
-    return () => clearTimeout(t);
-  }, []);
+  function destroyMap() {
+    if (tilesRef.current) { tilesRef.current.destroy(); tilesRef.current = null; }
+    if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; }
+    layerRef.current = null;
+  }
 
-  useEffect(() => () => { if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; } }, []);
+  function retry() {
+    destroyMap();
+    setTilesFailed(false);
+    setRetryKey((k) => k + 1);
+  }
+
+  useEffect(() => destroyMap, []);
 
   // Inicializa el mapa centrado en México.
   useEffect(() => {
-    const L = window.L;
-    if (!ready || !L || !elRef.current) return;
+    if (!L || !elRef.current) return;
     if (!mapRef.current) {
       mapRef.current = L.map(elRef.current, { zoomControl: true, attributionControl: true }).setView([23.6, -102.5], 5);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(mapRef.current);
+      tilesRef.current = attachBaseMap(L, mapRef.current, { onFail: () => setTilesFailed(true) });
       layerRef.current = L.layerGroup().addTo(mapRef.current);
     }
     setTimeout(() => mapRef.current && mapRef.current.invalidateSize(), 150);
-  }, [ready]);
+  }, [L, retryKey]);
 
   // Marcadores de promotores (se redibujan al cambiar el filtro).
   useEffect(() => {
-    const L = window.L;
-    if (!ready || !L || !mapRef.current || !layerRef.current) return;
+    if (!L || !mapRef.current || !layerRef.current) return;
     const layer = layerRef.current;
     layer.clearLayers();
     const pts = [];
@@ -166,15 +156,18 @@ export function NationalMap({ promoters, onSelect }) {
     } else if (pts.length > 1) {
       try { mapRef.current.fitBounds(pts, { padding: [40, 40], maxZoom: 11 }); } catch { /* noop */ }
     }
-  }, [ready, promoters, onSelect]);
+  }, [L, retryKey, promoters, onSelect]);
 
   if (failed) {
     return (
       <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 20, textAlign: "center", background: COLORS.surface }}>
         <MapPin size={24} color={COLORS.accentText} />
         <span style={{ fontSize: 13, color: COLORS.textMuted, lineHeight: 1.5 }}>
-          El mapa no cargó en esta red (se bloqueó OpenStreetMap). Se verá al desplegar o con otra conexión. El listado y las gráficas sí funcionan.
+          El mapa no cargó con esta conexión. El listado y las gráficas sí funcionan.
         </span>
+        <button onClick={retry} style={{ padding: "6px 14px", borderRadius: 9, border: `1px solid ${COLORS.border}`, background: COLORS.surface2, color: COLORS.text, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+          Reintentar
+        </button>
       </div>
     );
   }
