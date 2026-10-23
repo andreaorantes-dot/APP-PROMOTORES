@@ -149,7 +149,8 @@ de evidencia sin importar su teléfono.
 **Estado (15-oct-2026): implementado en la rama local `feature/mapa-camara`,
 falta probarlo en teléfonos reales.** Cámara integrada (`CameraCapture.jsx`)
 en la foto de check-in y en Competencia (varias fotos seguidas), con la cámara
-del sistema como respaldo. Probada en un navegador con una cámara simulada
+del sistema como respaldo y un botón para usar la **cámara frontal** (la foto
+se guarda sin invertir y por el mismo camino que las demás). Probada en un navegador con una cámara simulada
 (captura reducida, permiso denegado, varias fotos, liberación de la cámara);
 **no se ha probado con una cámara real ni en un teléfono de gama baja**.
 

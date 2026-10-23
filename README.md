@@ -528,6 +528,20 @@ selector de archivos con `capture`). En Competencia también hay un botón
 app pasa a segundo plano. Código compartido de imagen: `src/lib/imageTools.js`
 y `src/lib/photoPipeline.js` (archivos elegidos).
 
+**Cámara frontal:** si el teléfono tiene dos cámaras o más, abajo a la izquierda
+aparece el botón **"Frontal" / "Trasera"** para cambiar entre ellas (también en
+Competencia, foto por foto). Siempre abre con la trasera. Detalles:
+
+- En la frontal, la vista previa se ve como espejo (como en cualquier app de
+  cámara), pero **la foto se guarda sin invertir**, con el mismo camino de
+  siempre (reducida, WebP, cola offline cifrada si no hay señal). El encabezado
+  indica "Frontal" cuando está en uso.
+- Si el teléfono no tiene más de una cámara el botón no aparece. Si el navegador
+  no puede listarlas, se muestra por si acaso.
+- Si la otra cámara no abre, se regresa a la anterior con el aviso "No se pudo
+  cambiar de cámara", sin cerrar la cámara a media foto.
+- El historial de diagnóstico guarda con qué cámara se tomó cada foto (`facing`).
+
 Requiere HTTPS (o `localhost`), igual que el GPS.
 
 ## Diagnóstico del dispositivo y la red
