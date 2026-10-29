@@ -536,8 +536,20 @@ Competencia, foto por foto). Siempre abre con la trasera. Detalles:
   cámara), pero **la foto se guarda sin invertir**, con el mismo camino de
   siempre (reducida, WebP, cola offline cifrada si no hay señal). El encabezado
   indica "Frontal" cuando está en uso.
-- Si el teléfono no tiene más de una cámara el botón no aparece. Si el navegador
-  no puede listarlas, se muestra por si acaso.
+- **En teléfonos y tabletas el botón siempre aparece** (todos tienen frontal y
+  trasera, y varios navegadores móviles listan mal las cámaras: antes eso lo
+  dejaba oculto). En una computadora solo aparece si hay 2 cámaras o más.
+- **Sin cámara integrada** (la app abierta por `http://` sin HTTPS, p. ej. el
+  servidor de desarrollo por la IP de la red local, o un navegador sin
+  `getUserMedia`) no hay cambio dentro de la cámara, porque el navegador la
+  bloquea. En ese caso el check-in y Competencia ofrecen un botón aparte,
+  **"Cámara frontal" / "Frontal"**, que abre la cámara frontal del sistema
+  (`capture="user"`), con un aviso que explica que hace falta HTTPS. La foto
+  sigue el mismo camino (reducida, WebP). **Para ver la cámara integrada y su
+  botón en un teléfono, hay que abrir la app por HTTPS** (producción en Render,
+  o un túnel `cloudflared`/`ngrok`; ver MANUAL_DESPLIEGUE.md).
+- Esta función solo está en las ramas donde se haya desplegado: una versión
+  anterior del servidor muestra la cámara integrada sin el botón.
 - Si la otra cámara no abre, se regresa a la anterior con el aviso "No se pudo
   cambiar de cámara", sin cerrar la cámara a media foto.
 - El historial de diagnóstico guarda con qué cámara se tomó cada foto (`facing`).

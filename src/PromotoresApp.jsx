@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound, Heart, HardDrive, Download, ChevronRight, ChevronLeft, Ticket } from "lucide-react";
+import { LogOut, MapPin, ArrowLeft, Check, Minus, Plus, Navigation, AlertTriangle, Clock, WifiOff, RefreshCw, Camera, User, Lock, MessageSquare, Send, X, Home, BarChart3, GraduationCap, LifeBuoy, ImagePlus, Trophy, Zap, HelpCircle, Eye, EyeOff, KeyRound, Heart, HardDrive, Download, ChevronRight, ChevronLeft, Ticket, SwitchCamera } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider.jsx";
 import { api, ApiError } from "./lib/api.js";
 import { RANGE_METERS } from "./config.js";
@@ -513,14 +513,16 @@ export default function PromotoresApp() {
   const [compSending, setCompSending] = useState(false);
   const [compError, setCompError] = useState("");
   const compFileRef = useRef(null); // galería (varias fotos)
-  const compCaptureRef = useRef(null); // cámara del sistema (respaldo si no abre la integrada)
+  const compCaptureRef = useRef(null); // cámara trasera del sistema (respaldo si no abre la integrada)
+  const compFrontRef = useRef(null); // cámara frontal del sistema (respaldo)
   const [cameraFor, setCameraFor] = useState(null); // cámara integrada abierta: "visit" | "competition" | null
   const MAX_COMP_FOTOS = 5;
   const [rollos, setRollos] = useState(0);
   const [cubetas, setCubetas] = useState(0);
   const [photo, setPhoto] = useState(null); // foto de check-in (Base64), obligatoria
   const [photoBusy, setPhotoBusy] = useState(false);
-  const fileInputRef = useRef(null);
+  const fileInputRef = useRef(null); // cámara trasera del sistema (respaldo)
+  const frontFileRef = useRef(null); // cámara frontal del sistema (respaldo)
   const watchIdRef = useRef(null);
 
   // Estado de conectividad y cola offline cifrada.
@@ -879,9 +881,13 @@ export default function PromotoresApp() {
     else openSystemCamera(kind);
   }
 
-  function openSystemCamera(kind) {
+  // Abre la cámara del SISTEMA (selector de archivos con `capture`). `facing`:
+  // "environment" (trasera, por defecto) o "user" (frontal). Es el respaldo
+  // cuando la integrada no está disponible; funciona también sin HTTPS.
+  function openSystemCamera(kind, facing = "environment") {
     setCameraFor(null);
-    const ref = kind === "visit" ? fileInputRef : compCaptureRef;
+    const front = facing === "user";
+    const ref = kind === "visit" ? (front ? frontFileRef : fileInputRef) : (front ? compFrontRef : compCaptureRef);
     setTimeout(() => ref.current && ref.current.click(), 0);
   }
 
@@ -1366,6 +1372,14 @@ export default function PromotoresApp() {
                     onChange={handlePhotoChange}
                     style={{ display: "none" }}
                   />
+                  <input
+                    ref={frontFileRef}
+                    type="file"
+                    accept="image/*"
+                    capture="user"
+                    onChange={handlePhotoChange}
+                    style={{ display: "none" }}
+                  />
                   {cameraFor === "visit" && (
                     <CameraCapture
                       kind="visit"
@@ -1386,13 +1400,39 @@ export default function PromotoresApp() {
                   ) : (
                     <div style={{ marginTop: 10, position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
                       <img src={photo} alt="Foto de la visita" style={{ width: "100%", display: "block", maxHeight: 220, objectFit: "cover" }} />
-                      <button
-                        onClick={() => openCamera("visit")}
-                        style={{ position: "absolute", right: 10, bottom: 10, padding: "7px 12px", borderRadius: 9, border: "none", background: "rgba(15,22,32,0.82)", color: COLORS.text, fontSize: 12.5, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
-                      >
-                        <Camera size={14} /> Retomar
-                      </button>
+                      <div style={{ position: "absolute", right: 10, bottom: 10, display: "flex", gap: 8 }}>
+                        {!cameraSupported() && (
+                          <button
+                            onClick={() => openSystemCamera("visit", "user")}
+                            style={{ padding: "7px 12px", borderRadius: 9, border: "none", background: "rgba(15,22,32,0.82)", color: COLORS.text, fontSize: 12.5, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                          >
+                            <SwitchCamera size={14} /> Frontal
+                          </button>
+                        )}
+                        <button
+                          onClick={() => openCamera("visit")}
+                          style={{ padding: "7px 12px", borderRadius: 9, border: "none", background: "rgba(15,22,32,0.82)", color: COLORS.text, fontSize: 12.5, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                        >
+                          <Camera size={14} /> Retomar
+                        </button>
+                      </div>
                     </div>
+                  )}
+                  {/* Sin la cámara integrada (p. ej. la app abierta por http://, sin HTTPS) se usa la del
+                      teléfono: la frontal se pide con este botón aparte, y se explica por qué. */}
+                  {!cameraSupported() && !photo && (
+                    <>
+                      <button
+                        onClick={() => openSystemCamera("visit", "user")}
+                        disabled={photoBusy}
+                        style={{ width: "100%", marginTop: 8, padding: "11px 0", borderRadius: 12, border: `1px solid ${COLORS.border}`, background: "transparent", color: COLORS.text, fontFamily: "Inter", fontWeight: 600, fontSize: 13.5, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                      >
+                        <SwitchCamera size={16} color={COLORS.accentText} /> Cámara frontal
+                      </button>
+                      <p style={{ fontSize: 11.5, color: COLORS.textMuted, margin: "8px 0 0", lineHeight: 1.45 }}>
+                        La cámara integrada de la app necesita conexión segura (HTTPS); aquí se usa la cámara del teléfono.
+                      </p>
+                    </>
                   )}
                 </div>
               )}
@@ -1559,6 +1599,7 @@ export default function PromotoresApp() {
               <label style={{ fontSize: 12, color: COLORS.textMuted, display: "block", marginBottom: 6, fontWeight: 600 }}>Evidencia (fotos, hasta {MAX_COMP_FOTOS})</label>
               <input ref={compFileRef} type="file" accept="image/*" multiple onChange={handleCompFotos} style={{ display: "none" }} />
               <input ref={compCaptureRef} type="file" accept="image/*" capture="environment" onChange={handleCompFotos} style={{ display: "none" }} />
+              <input ref={compFrontRef} type="file" accept="image/*" capture="user" onChange={handleCompFotos} style={{ display: "none" }} />
               {cameraFor === "competition" && (
                 <CameraCapture
                   kind="competition"
@@ -1584,7 +1625,20 @@ export default function PromotoresApp() {
                   >
                     <ImagePlus size={16} color={COLORS.accentText} /> Galería
                   </button>
+                  {!cameraSupported() && (
+                    <button
+                      onClick={() => openSystemCamera("competition", "user")}
+                      style={{ flex: 1, padding: "16px 0", borderRadius: 12, border: `1.5px dashed ${COLORS.border}`, background: COLORS.surface2, color: COLORS.textMuted, fontWeight: 600, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+                    >
+                      <SwitchCamera size={16} color={COLORS.accentText} /> Frontal
+                    </button>
+                  )}
                 </div>
+              )}
+              {!cameraSupported() && compFotos.length < MAX_COMP_FOTOS && (
+                <p style={{ fontSize: 11.5, color: COLORS.textMuted, margin: "8px 0 0", lineHeight: 1.45 }}>
+                  La cámara integrada de la app necesita conexión segura (HTTPS); aquí se usa la cámara del teléfono.
+                </p>
               )}
               {compFotos.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>

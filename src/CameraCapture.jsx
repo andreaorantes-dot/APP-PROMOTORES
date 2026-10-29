@@ -26,6 +26,10 @@ export function cameraSupported() {
 const RELEASE_MS = 300; // lo que tarda el hardware en soltarse tras apagar una cámara
 const RETRY_MS = 500; // espera antes de reintentar cuando la cámara sigue ocupada
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Teléfono o tableta (iPadOS moderno se identifica como Mac, de ahí el chequeo táctil).
+const IS_MOBILE = typeof navigator !== "undefined"
+  && (/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")
+    || (/Macintosh/i.test(navigator.userAgent || "") && (navigator.maxTouchPoints || 0) > 1));
 
 function stopStream(stream) {
   if (stream) for (const t of stream.getTracks()) t.stop();
@@ -49,11 +53,15 @@ export default function CameraCapture({ kind = "visit", onCapture, onClose, onUn
   // abre siempre con la trasera; el botón del encabezado cambia entre las dos.
   const [facing, setFacing] = useState("environment");
   const facingRef = useRef("environment");
-  const [multiCam, setMultiCam] = useState(false); // el equipo tiene 2 cámaras o más (o no se puede saber)
+  const [multiCam, setMultiCam] = useState(IS_MOBILE); // mostrar el botón de cambio (ver detectCameras)
 
-  // ¿Hay más de una cámara? Solo entonces se muestra el botón de cambio. Si el
-  // navegador no puede listarlas, se muestra por si acaso (si falla, se regresa a la anterior).
+  // ¿Se muestra el botón de cambio? Sí en cualquier teléfono o tableta (todos
+  // tienen frontal y trasera, y varios navegadores móviles listan mal las
+  // cámaras: antes eso dejaba el botón oculto en teléfonos que sí tienen dos).
+  // En una computadora solo si hay 2 cámaras o más. Si el navegador no puede
+  // listarlas, se muestra por si acaso (si falla, se regresa a la anterior).
   async function detectCameras() {
+    if (IS_MOBILE) { setMultiCam(true); return; }
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
       setMultiCam(devices.filter((d) => d.kind === "videoinput").length >= 2);
