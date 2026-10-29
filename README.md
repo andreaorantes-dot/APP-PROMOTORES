@@ -541,6 +541,14 @@ Competencia, foto por foto). Siempre abre con la trasera. Detalles:
 - Si la otra cámara no abre, se regresa a la anterior con el aviso "No se pudo
   cambiar de cámara", sin cerrar la cámara a media foto.
 - El historial de diagnóstico guarda con qué cámara se tomó cada foto (`facing`).
+- **Apertura robusta** (`openCamera` en `CameraCapture.jsx`): una sola apertura
+  a la vez (las peticiones se encolan y las obsoletas se descartan con un
+  token), espera ~300 ms a que el hardware suelte la cámara anterior antes de
+  pedir la siguiente, reintenta `NotReadableError`/`AbortError` (cámara aún
+  ocupada) y, si el equipo rechaza resolución o fps (`OverconstrainedError`),
+  reintenta pidiendo solo la cámara. Sin esto, en Android el cambio a la
+  frontal fallaba siempre y, en desarrollo, el doble montaje de React
+  `StrictMode` abría dos veces la cámara y mostraba un error falso.
 
 Requiere HTTPS (o `localhost`), igual que el GPS.
 

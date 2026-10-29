@@ -23,6 +23,10 @@ export function cameraSupported() {
     && (typeof window === "undefined" || window.isSecureContext !== false);
 }
 
+const RELEASE_MS = 300; // lo que tarda el hardware en soltarse tras apagar una cámara
+const RETRY_MS = 500; // espera antes de reintentar cuando la cámara sigue ocupada
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function stopStream(stream) {
   if (stream) for (const t of stream.getTracks()) t.stop();
 }
@@ -58,50 +62,119 @@ export default function CameraCapture({ kind = "visit", onCapture, onClose, onUn
     }
   }
 
-  // Abre la cámara pedida (por defecto, la que está en uso). Devuelve true si abrió.
-  const start = useCallback(async (wanted = facingRef.current) => {
-    stopStream(streamRef.current);
+  // --- Apertura de la cámara ------------------------------------------------------
+  // Reglas que evitan los errores que da el hardware real de los teléfonos:
+  //  1. UNA sola apertura a la vez. Las llamadas se encolan (`chain`) y cada una
+  //     lleva un `token`: si llega una más nueva (o se cierra el componente) la
+  //     vieja se descarta sin tocar el hardware. Cubre el doble montaje de React
+  //     StrictMode en desarrollo y los toques seguidos en "Frontal/Trasera".
+  //     Antes se hacían dos getUserMedia a la vez: uno fallaba con NotReadableError
+  //     y la pantalla mostraba el error aunque hubiera una cámara abierta.
+  //  2. El hardware tarda en soltarse: se espera lo que falte de ~300 ms desde que
+  //     se apagó la cámara anterior antes de pedir la siguiente (sin esto, cambiar
+  //     a la frontal fallaba siempre en Android).
+  //  3. NotReadableError / AbortError (cámara aún ocupada) se reintenta.
+  //  4. Si el equipo rechaza resolución o fps (OverconstrainedError) se reintenta
+  //     pidiendo solo la cámara.
+  const startToken = useRef(0);
+  const chain = useRef(Promise.resolve());
+  const releasedAt = useRef(0);
+
+  // Apaga la cámara en uso y la desconecta del <video>.
+  function releaseStream() {
+    const stream = streamRef.current;
     streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    if (stream) {
+      stopStream(stream);
+      releasedAt.current = Date.now();
+    }
+  }
+
+  function showError(err) {
+    const name = err?.name || "";
+    setState("error");
+    if (name === "NotAllowedError" || name === "SecurityError") {
+      setErrorMsg("No diste permiso para usar la cámara. Actívalo en el navegador o usa la cámara del teléfono.");
+    } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+      setErrorMsg("No se encontró una cámara disponible. Usa la cámara del teléfono.");
+    } else {
+      setErrorMsg("La cámara no pudo abrirse (puede estar en uso por otra app). Usa la cámara del teléfono.");
+    }
+  }
+
+  // Devuelve "ok" | "fail" | "stale" (reemplazada por otra apertura, o se cerró).
+  const openCamera = useCallback(async (wanted, token) => {
+    if (token !== startToken.current) return "stale";
+    const wait = RELEASE_MS - (Date.now() - releasedAt.current);
+    if (wait > 0) await sleep(wait);
+    if (token !== startToken.current) return "stale";
+
+    let constraints = {
+      video: {
+        facingMode: { ideal: wanted },
+        width: { ideal: rec.video.width },
+        height: { ideal: rec.video.height },
+        frameRate: { ideal: rec.video.frameRate, max: 30 },
+      },
+      audio: false,
+    };
+    let relaxed = false;
+    let stream = null;
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3 && !stream; attempt++) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        lastErr = err;
+      }
+      if (token !== startToken.current) { stopStream(stream); return "stale"; }
+      if (stream) break;
+      const name = lastErr?.name;
+      if (name === "OverconstrainedError" && !relaxed) {
+        relaxed = true;
+        constraints = { video: { facingMode: { ideal: wanted } }, audio: false };
+      } else if (name === "NotReadableError" || name === "AbortError") {
+        await sleep(RETRY_MS);
+        if (token !== startToken.current) return "stale";
+      } else {
+        break;
+      }
+    }
+    if (!stream) {
+      showError(lastErr);
+      return "fail";
+    }
+
+    const video = videoRef.current;
+    if (!video) { stopStream(stream); return "stale"; } // se cerró mientras pedía permiso
+    streamRef.current = stream;
+    video.srcObject = stream;
+    await video.play().catch(() => {});
+    if (token !== startToken.current) { releaseStream(); return "stale"; }
+    // Si el navegador informa qué cámara abrió de verdad, se usa ese dato
+    // (`ideal` no falla cuando no existe la pedida): así el espejo y la
+    // etiqueta siempre corresponden a la cámara real.
+    const actual = stream.getVideoTracks()[0]?.getSettings?.().facingMode;
+    const used = actual === "user" || actual === "environment" ? actual : wanted;
+    facingRef.current = used;
+    setFacing(used);
+    detectCameras();
+    setState("ready");
+    return "ok";
+  }, [rec]);
+
+  // Abre la cámara pedida (por defecto, la que está en uso). Devuelve "ok",
+  // "fail" o "stale" (ver openCamera).
+  const start = useCallback((wanted = facingRef.current) => {
+    const token = ++startToken.current;
+    releaseStream();
     setState("starting");
     setErrorMsg("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: wanted },
-          width: { ideal: rec.video.width },
-          height: { ideal: rec.video.height },
-          frameRate: { ideal: rec.video.frameRate, max: 30 },
-        },
-        audio: false,
-      });
-      streamRef.current = stream;
-      const video = videoRef.current;
-      if (!video) { stopStream(stream); return false; } // se cerró mientras pedía permiso
-      video.srcObject = stream;
-      await video.play().catch(() => {});
-      // Si el navegador informa qué cámara abrió de verdad, se usa ese dato
-      // (`ideal` no falla cuando no existe la pedida): así el espejo y la
-      // etiqueta siempre corresponden a la cámara real.
-      const actual = stream.getVideoTracks()[0]?.getSettings?.().facingMode;
-      const used = actual === "user" || actual === "environment" ? actual : wanted;
-      facingRef.current = used;
-      setFacing(used);
-      detectCameras();
-      setState("ready");
-      return true;
-    } catch (err) {
-      const name = err?.name || "";
-      setState("error");
-      if (name === "NotAllowedError" || name === "SecurityError") {
-        setErrorMsg("No diste permiso para usar la cámara. Actívalo en el navegador o usa la cámara del teléfono.");
-      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
-        setErrorMsg("No se encontró una cámara disponible. Usa la cámara del teléfono.");
-      } else {
-        setErrorMsg("La cámara no pudo abrirse (puede estar en uso por otra app). Usa la cámara del teléfono.");
-      }
-      return false;
-    }
-  }, [rec]);
+    const run = chain.current.then(() => openCamera(wanted, token)).catch(() => "fail");
+    chain.current = run;
+    return run;
+  }, [openCamera]);
 
   // Cambia entre cámara trasera y frontal. Si la otra no abre, se vuelve a la
   // anterior para no dejar al promotor sin cámara a media foto.
@@ -109,14 +182,18 @@ export default function CameraCapture({ kind = "visit", onCapture, onClose, onUn
     if (state !== "ready") return;
     const prev = facingRef.current;
     const next = prev === "user" ? "environment" : "user";
-    if (await start(next)) return;
-    if (await start(prev)) setErrorMsg("No se pudo cambiar de cámara.");
+    const result = await start(next);
+    if (result !== "fail") return; // "ok", o ya la reemplazó otra apertura
+    if ((await start(prev)) === "ok") setErrorMsg("No se pudo cambiar de cámara.");
   }
 
   // Abre la cámara al montar y la libera siempre al desmontar.
   useEffect(() => {
     start();
-    return () => { stopStream(streamRef.current); streamRef.current = null; };
+    return () => {
+      startToken.current++; // descarta cualquier apertura pendiente (p. ej. el doble montaje de StrictMode)
+      releaseStream();
+    };
   }, [start]);
 
   // Si la app pasa a segundo plano se suelta la cámara (ahorra batería y
@@ -124,9 +201,9 @@ export default function CameraCapture({ kind = "visit", onCapture, onClose, onUn
   useEffect(() => {
     function onVisibility() {
       if (document.hidden) {
-        stopStream(streamRef.current);
-        streamRef.current = null;
-        setState((s) => (s === "ready" ? "paused" : s));
+        startToken.current++; // si había una apertura en curso, se descarta
+        releaseStream();
+        setState((s) => (s === "ready" || s === "starting" ? "paused" : s));
       }
     }
     document.addEventListener("visibilitychange", onVisibility);
@@ -156,8 +233,7 @@ export default function CameraCapture({ kind = "visit", onCapture, onClose, onUn
       const total = shots + 1;
       setShots(total);
       if (!multi || baseCount.current + total >= max) {
-        stopStream(streamRef.current);
-        streamRef.current = null;
+        releaseStream();
         onClose();
       }
     } catch (err) {
